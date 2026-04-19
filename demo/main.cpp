@@ -62,6 +62,12 @@ int main(int argc, char* argv[])
 
     // --- File dialog demo ---
     const QString home = QDir::homePath();
+    QStringList fileHistory, dirHistory;
+    auto addToHistory = [](QStringList& list, const QString& path) {
+        if (path.isEmpty()) return;
+        list.removeAll(path);
+        list.prepend(path);
+    };
 
     auto* fileGroup = new QGroupBox("File");
     auto* fileLayout = new QVBoxLayout(fileGroup);
@@ -110,11 +116,15 @@ int main(int argc, char* argv[])
 
     QObject::connect(fileCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
-            log("open custom", QxFileBrowser::getOpenFileName(
-                &mainWindow, "Open File", home, fileFilter));
+            QString f = QxFileBrowser::getOpenFileName(
+                &mainWindow, "Open File", home, fileFilter, fileHistory);
+            addToHistory(fileHistory, f);
+            log("open custom", f);
         } else {
-            log("save custom", QxFileBrowser::getSaveFileName(
-                &mainWindow, "Save File", home, fileFilter, "untitled.txt"));
+            QString f = QxFileBrowser::getSaveFileName(
+                &mainWindow, "Save File", home, fileFilter, "untitled.txt", fileHistory);
+            addToHistory(fileHistory, f);
+            log("save custom", f);
         }
     });
 
@@ -147,8 +157,10 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        log("dir custom", QxFileBrowser::getExistingDirectory(
-            &mainWindow, "Select Directory", home));
+        QString d = QxFileBrowser::getExistingDirectory(
+            &mainWindow, "Select Directory", home, dirHistory);
+        addToHistory(dirHistory, d);
+        log("dir custom", d);
     });
 
     auto* dialogRowLayout = new QHBoxLayout;

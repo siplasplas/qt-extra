@@ -130,7 +130,10 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     navLayout->addWidget(m_pathEdit, 1);
 
     // Bottom bar
-    m_fileEdit    = new QLineEdit;
+    m_fileEdit = new QComboBox;
+    m_fileEdit->setEditable(true);
+    m_fileEdit->setInsertPolicy(QComboBox::NoInsert);
+    m_fileEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
     m_filterCombo = new QComboBox;
     m_filterCombo->setMinimumWidth(200);
     m_acceptBtn   = new QPushButton(mode == Open ? "Open" : mode == Save ? "Save" : "Choose");
@@ -174,7 +177,8 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     connect(m_forwardBtn, &QToolButton::clicked, this, &QxFileBrowser::goForward);
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileBrowser::goUp);
     m_pathEdit->installEventFilter(this);
-    connect(m_fileEdit,   &QLineEdit::returnPressed, this, &QxFileBrowser::onFileEditReturnPressed);
+    connect(m_fileEdit->lineEdit(), &QLineEdit::returnPressed,
+            this, &QxFileBrowser::onFileEditReturnPressed);
     connect(m_view, &QTreeView::activated, this, &QxFileBrowser::onItemActivated);
     connect(m_view->selectionModel(), &QItemSelectionModel::currentChanged,
             this, [this](const QModelIndex& current, const QModelIndex&) {
@@ -216,7 +220,16 @@ void QxFileBrowser::setSizeUnit(SizeUnit unit)
 
 void QxFileBrowser::setFileName(const QString& name)
 {
-    m_fileEdit->setText(name);
+    m_fileEdit->setCurrentText(name);
+}
+
+void QxFileBrowser::setHistory(const QStringList& paths)
+{
+    m_fileEdit->blockSignals(true);
+    m_fileEdit->clear();
+    m_fileEdit->addItems(paths);
+    m_fileEdit->clearEditText();
+    m_fileEdit->blockSignals(false);
 }
 
 void QxFileBrowser::setDefaultSuffix(const QString& suffix)
@@ -226,7 +239,7 @@ void QxFileBrowser::setDefaultSuffix(const QString& suffix)
 
 QString QxFileBrowser::selectedFile() const
 {
-    QString name = m_fileEdit->text().trimmed();
+    QString name = m_fileEdit->currentText().trimmed();
     if (name.isEmpty())
         return m_mode == Directory ? m_currentPath : QString{};
     if (QFileInfo(name).isAbsolute()) return name;
@@ -238,9 +251,9 @@ QString QxFileBrowser::selectedFile() const
 void QxFileBrowser::showEvent(QShowEvent* event)
 {
     QDialog::showEvent(event);
-    if (m_mode == Save && !m_fileEdit->text().isEmpty()) {
+    if (m_mode == Save && !m_fileEdit->currentText().isEmpty()) {
         m_fileEdit->setFocus();
-        m_fileEdit->selectAll();
+        m_fileEdit->lineEdit()->selectAll();
     }
 }
 
@@ -261,7 +274,7 @@ void QxFileBrowser::navigateTo(const QString& path, bool pushToHistory)
     m_pathEdit->setText(canonical);
     m_view->setRootIndex(m_model->index(canonical));
     m_view->clearSelection();
-    if (m_mode == Directory) m_fileEdit->clear();
+    if (m_mode == Directory) m_fileEdit->clearEditText();
     updateNavButtons();
 }
 
@@ -310,7 +323,7 @@ void QxFileBrowser::onItemActivated(const QModelIndex& index)
     if (m_model->isDir(index)) {
         navigateTo(m_model->filePath(index));
     } else {
-        m_fileEdit->setText(m_model->fileName(index));
+        m_fileEdit->setCurrentText(m_model->fileName(index));
         tryAccept();
     }
 }
@@ -319,11 +332,11 @@ void QxFileBrowser::onCurrentItemChanged(const QModelIndex& current)
 {
     if (!current.isValid()) return;
     if (m_mode == Directory) {
-        m_fileEdit->setText(m_model->fileName(current));
+        m_fileEdit->setCurrentText(m_model->fileName(current));
     } else if (m_model->isDir(current)) {
-        m_fileEdit->clear();
+        m_fileEdit->clearEditText();
     } else {
-        m_fileEdit->setText(m_model->fileName(current));
+        m_fileEdit->setCurrentText(m_model->fileName(current));
     }
 }
 
@@ -350,7 +363,7 @@ void QxFileBrowser::onPathEditReturnPressed()
         QDir parent = info.dir();
         if (parent.exists()) {
             navigateTo(parent.canonicalPath());
-            m_fileEdit->setText(info.fileName());
+            m_fileEdit->setCurrentText(info.fileName());
         }
     }
 }
@@ -381,7 +394,7 @@ bool QxFileBrowser::tryAccept()
         QFileInfo info(file);
         if (info.suffix().isEmpty())
             file += "." + m_defaultSuffix;
-        m_fileEdit->setText(QFileInfo(file).fileName());
+        m_fileEdit->setCurrentText(QFileInfo(file).fileName());
     }
 
     if (m_mode == Open && !QFileInfo::exists(file)) return false;
@@ -418,32 +431,38 @@ QList<QxFileBrowser::FilterEntry> QxFileBrowser::parseFilter(const QString& filt
 // ---------------------------------------------------------------------------
 
 QString QxFileBrowser::getOpenFileName(QWidget* parent, const QString& caption,
-                                       const QString& dir, const QString& filter)
+                                       const QString& dir, const QString& filter,
+                                       const QStringList& history)
 {
     QxFileBrowser dlg(parent, Open);
     if (!caption.isEmpty()) dlg.setWindowTitle(caption);
     if (!dir.isEmpty())     dlg.setDirectory(dir);
     if (!filter.isEmpty())  dlg.setNameFilter(filter);
+    if (!history.isEmpty()) dlg.setHistory(history);
     return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
 }
 
 QString QxFileBrowser::getSaveFileName(QWidget* parent, const QString& caption,
                                        const QString& dir, const QString& filter,
-                                       const QString& defaultName)
+                                       const QString& defaultName,
+                                       const QStringList& history)
 {
     QxFileBrowser dlg(parent, Save);
-    if (!caption.isEmpty())    dlg.setWindowTitle(caption);
-    if (!dir.isEmpty())        dlg.setDirectory(dir);
-    if (!filter.isEmpty())     dlg.setNameFilter(filter);
+    if (!caption.isEmpty())     dlg.setWindowTitle(caption);
+    if (!dir.isEmpty())         dlg.setDirectory(dir);
+    if (!filter.isEmpty())      dlg.setNameFilter(filter);
     if (!defaultName.isEmpty()) dlg.setFileName(defaultName);
+    if (!history.isEmpty())     dlg.setHistory(history);
     return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
 }
 
 QString QxFileBrowser::getExistingDirectory(QWidget* parent, const QString& caption,
-                                             const QString& dir)
+                                             const QString& dir,
+                                             const QStringList& history)
 {
     QxFileBrowser dlg(parent, Directory);
-    if (!caption.isEmpty()) dlg.setWindowTitle(caption);
-    if (!dir.isEmpty())     dlg.setDirectory(dir);
+    if (!caption.isEmpty())     dlg.setWindowTitle(caption);
+    if (!dir.isEmpty())         dlg.setDirectory(dir);
+    if (!history.isEmpty())     dlg.setHistory(history);
     return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
 }

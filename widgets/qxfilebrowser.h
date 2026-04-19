@@ -26,25 +26,27 @@ public:
     void    setDefaultSuffix(const QString& suffix);
     void    setSizeUnit(SizeUnit unit);
     void    setFileName(const QString& name);
+    void    setHistory(const QStringList& paths);
     QString selectedFile() const;
 
     static QString getOpenFileName(QWidget* parent,
                                    const QString& caption,
                                    const QString& dir,
-                                   const QString& filter = QString());
+                                   const QString& filter = {},
+                                   const QStringList& history = {});
     static QString getSaveFileName(QWidget* parent,
                                    const QString& caption,
                                    const QString& dir,
-                                   const QString& filter = QString(),
-                                   const QString& defaultName = {});
+                                   const QString& filter = {},
+                                   const QString& defaultName = {},
+                                   const QStringList& history = {});
     static QString getExistingDirectory(QWidget* parent,
                                         const QString& caption,
-                                        const QString& dir);
+                                        const QString& dir,
+                                        const QStringList& history = {});
 
 protected:
     void showEvent(QShowEvent* event) override;
-
-protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
@@ -73,7 +75,7 @@ private:
     QListWidget*      m_places;
     QTreeView*        m_view;
     QLineEdit*        m_pathEdit;
-    QLineEdit*        m_fileEdit;
+    QComboBox*        m_fileEdit;
     QComboBox*        m_filterCombo;
     QToolButton*      m_backBtn;
     QToolButton*      m_forwardBtn;
