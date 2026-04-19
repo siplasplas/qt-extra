@@ -14,12 +14,15 @@ class QxFileBrowser : public QDialog
 {
     Q_OBJECT
 public:
-    enum Mode { Open, Save };
+    enum Mode     { Open, Save };
+    enum SizeUnit { SizeSI = 1000, SizeIEC = 1024 };
+
     explicit QxFileBrowser(QWidget* parent = nullptr, Mode mode = Open);
 
     void    setDirectory(const QString& path);
     void    setNameFilter(const QString& filter);
     void    setDefaultSuffix(const QString& suffix);
+    void    setSizeUnit(SizeUnit unit);
     QString selectedFile() const;
 
     static QString getOpenFileName(QWidget* parent,

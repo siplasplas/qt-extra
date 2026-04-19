@@ -17,14 +17,36 @@
 #include <QDateTime>
 #include <QKeyEvent>
 
-// QFileSystemModel subclass — overrides date column to use yyyy-MM-dd HH:mm format
 class DateFileSystemModel : public QFileSystemModel {
+    int m_sizeBase = 1000;
 public:
     using QFileSystemModel::QFileSystemModel;
+    void setSizeBase(int base) { m_sizeBase = base; }
+
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override {
-        if (role == Qt::DisplayRole && index.column() == 3)
-            return fileInfo(index).lastModified().toString("yyyy-MM-dd HH:mm");
+        if (role == Qt::DisplayRole) {
+            if (index.column() == 3)
+                return fileInfo(index).lastModified().toString("yyyy-MM-dd HH:mm");
+            if (index.column() == 1 && !isDir(index))
+                return formatSize(fileInfo(index).size(), m_sizeBase);
+        }
         return QFileSystemModel::data(index, role);
+    }
+
+private:
+    static QString formatSize(qint64 bytes, int base) {
+        if (bytes < base)
+            return QString::number(bytes) + " B";
+        const char* s1000[] = { "kB", "MB", "GB", "TB", "PB" };
+        const char* s1024[] = { "KiB", "MiB", "GiB", "TiB", "PiB" };
+        const char** s = (base == 1024) ? s1024 : s1000;
+        double v = bytes;
+        int i = 0;
+        while (v >= base && i < 4) { v /= base; ++i; }
+        QString n = (v < 10)  ? QString::number(v, 'f', 2)
+                  : (v < 100) ? QString::number(v, 'f', 1)
+                  :              QString::number(static_cast<int>(v + 0.5));
+        return n + ' ' + s[i - 1];
     }
 };
 
@@ -124,6 +146,12 @@ void QxFileBrowser::setNameFilter(const QString& filter)
         m_filterCombo->addItem(f.display.isEmpty() ? f.patterns.join(" ") : f.display);
     m_filterCombo->blockSignals(false);
     applyCurrentFilter();
+}
+
+void QxFileBrowser::setSizeUnit(SizeUnit unit)
+{
+    static_cast<DateFileSystemModel*>(m_model)->setSizeBase(static_cast<int>(unit));
+    m_view->viewport()->update();
 }
 
 void QxFileBrowser::setDefaultSuffix(const QString& suffix)
