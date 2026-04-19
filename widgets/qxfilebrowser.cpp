@@ -192,8 +192,12 @@ void QxFileBrowser::setNameFilter(const QString& filter)
     m_filters = parseFilter(filter);
     m_filterCombo->blockSignals(true);
     m_filterCombo->clear();
-    for (const auto& f : m_filters)
-        m_filterCombo->addItem(f.display.isEmpty() ? f.patterns.join(" ") : f.display);
+    for (const auto& f : m_filters) {
+        QString label = f.display.isEmpty()
+            ? f.patterns.join(" ")
+            : f.display + " (" + f.patterns.join(" ") + ")";
+        m_filterCombo->addItem(label);
+    }
     m_filterCombo->blockSignals(false);
     applyCurrentFilter();
 }
