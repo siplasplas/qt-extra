@@ -3,6 +3,8 @@
 #include <QStringList>
 
 class QFileSystemModel;
+class QListWidget;
+class QListWidgetItem;
 class QTreeView;
 class QLineEdit;
 class QComboBox;
@@ -60,6 +62,7 @@ private:
     QList<FilterEntry> parseFilter(const QString& filter);
 
     QFileSystemModel* m_model;
+    QListWidget*      m_places;
     QTreeView*        m_view;
     QLineEdit*        m_pathEdit;
     QLineEdit*        m_fileEdit;

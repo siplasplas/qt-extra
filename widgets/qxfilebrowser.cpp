@@ -8,9 +8,12 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QTreeView>
+#include <QListWidget>
+#include <QSplitter>
 #include <QItemSelectionModel>
 #include <QHeaderView>
 #include <QFileSystemModel>
+#include <QStandardPaths>
 #include <QLabel>
 #include <QDir>
 #include <QFileInfo>
@@ -61,6 +64,33 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     m_model->setRootPath(QDir::rootPath());
     m_model->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
 
+    // Places panel (left)
+    m_places = new QListWidget;
+    m_places->setFrameShape(QFrame::NoFrame);
+    m_places->setFixedWidth(150);
+    m_places->setSpacing(1);
+
+    struct Place { QString name; QStandardPaths::StandardLocation loc; const char* themeIcon; };
+    static const Place places[] = {
+        { "Home",      QStandardPaths::HomeLocation,      "user-home"        },
+        { "Desktop",   QStandardPaths::DesktopLocation,   "user-desktop"     },
+        { "Documents", QStandardPaths::DocumentsLocation, "folder-documents" },
+        { "Downloads", QStandardPaths::DownloadLocation,  "folder-download"  },
+        { "Music",     QStandardPaths::MusicLocation,     "folder-music"     },
+        { "Pictures",  QStandardPaths::PicturesLocation,  "folder-pictures"  },
+        { "Videos",    QStandardPaths::MoviesLocation,    "folder-videos"    },
+    };
+    for (const auto& p : places) {
+        QString path = QStandardPaths::writableLocation(p.loc);
+        if (path.isEmpty() || !QDir(path).exists()) continue;
+        auto* item = new QListWidgetItem(p.name, m_places);
+        QIcon icon = QIcon::fromTheme(p.themeIcon);
+        if (icon.isNull()) icon = style()->standardIcon(QStyle::SP_DirIcon);
+        item->setIcon(icon);
+        item->setData(Qt::UserRole, path);
+        item->setToolTip(path);
+    }
+
     // File tree view (multi-column)
     m_view = new QTreeView;
     m_view->setModel(m_model);
@@ -106,14 +136,25 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     btnLayout->addWidget(m_acceptBtn);
     btnLayout->addWidget(cancelBtn);
 
+    auto* centerSplitter = new QSplitter(Qt::Horizontal);
+    centerSplitter->addWidget(m_places);
+    centerSplitter->addWidget(m_view);
+    centerSplitter->setStretchFactor(0, 0);
+    centerSplitter->setStretchFactor(1, 1);
+    centerSplitter->setChildrenCollapsible(false);
+
     // Main layout
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->addLayout(navLayout);
-    mainLayout->addWidget(m_view, 1);
+    mainLayout->addWidget(centerSplitter, 1);
     mainLayout->addLayout(bottomGrid);
     mainLayout->addLayout(btnLayout);
 
     // Connections
+    connect(m_places, &QListWidget::itemClicked, this, [this](QListWidgetItem* item) {
+        navigateTo(item->data(Qt::UserRole).toString());
+        m_places->clearSelection();
+    });
     connect(m_backBtn,    &QToolButton::clicked, this, &QxFileBrowser::goBack);
     connect(m_forwardBtn, &QToolButton::clicked, this, &QxFileBrowser::goForward);
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileBrowser::goUp);
