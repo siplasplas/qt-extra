@@ -13,6 +13,7 @@
 #include <QItemSelectionModel>
 #include <QHeaderView>
 #include <QFileSystemModel>
+#include <QSet>
 #include <QStandardPaths>
 #include <QLabel>
 #include <QDir>
@@ -67,22 +68,31 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     // Places panel (left)
     m_places = new QListWidget;
     m_places->setFrameShape(QFrame::NoFrame);
-    m_places->setFixedWidth(150);
+    m_places->setMinimumWidth(80);
+    m_places->setMaximumWidth(260);
     m_places->setSpacing(1);
 
     struct Place { QString name; QStandardPaths::StandardLocation loc; const char* themeIcon; };
     static const Place places[] = {
-        { "Home",      QStandardPaths::HomeLocation,      "user-home"        },
-        { "Desktop",   QStandardPaths::DesktopLocation,   "user-desktop"     },
-        { "Documents", QStandardPaths::DocumentsLocation, "folder-documents" },
-        { "Downloads", QStandardPaths::DownloadLocation,  "folder-download"  },
-        { "Music",     QStandardPaths::MusicLocation,     "folder-music"     },
-        { "Pictures",  QStandardPaths::PicturesLocation,  "folder-pictures"  },
-        { "Videos",    QStandardPaths::MoviesLocation,    "folder-videos"    },
+        { "Home",        QStandardPaths::HomeLocation,           "user-home"           },
+        { "Desktop",     QStandardPaths::DesktopLocation,        "user-desktop"        },
+        { "Documents",   QStandardPaths::DocumentsLocation,      "folder-documents"    },
+        { "Downloads",   QStandardPaths::DownloadLocation,       "folder-download"     },
+        { "Music",       QStandardPaths::MusicLocation,          "folder-music"        },
+        { "Pictures",    QStandardPaths::PicturesLocation,       "folder-pictures"     },
+        { "Videos",      QStandardPaths::MoviesLocation,         "folder-videos"       },
+        { "Fonts",       QStandardPaths::FontsLocation,          "folder"              },
+        { "Config",      QStandardPaths::GenericConfigLocation,  "folder-settings"     },
+        { "Data",        QStandardPaths::GenericDataLocation,    "folder"              },
+        { "Cache",       QStandardPaths::GenericCacheLocation,   "folder"              },
+        { "Apps",        QStandardPaths::ApplicationsLocation,   "folder-applications" },
+        { "Temp",        QStandardPaths::TempLocation,           "folder-temp"         },
     };
+    QSet<QString> seenPaths;
     for (const auto& p : places) {
         QString path = QStandardPaths::writableLocation(p.loc);
-        if (path.isEmpty() || !QDir(path).exists()) continue;
+        if (path.isEmpty() || !QDir(path).exists() || seenPaths.contains(path)) continue;
+        seenPaths.insert(path);
         auto* item = new QListWidgetItem(p.name, m_places);
         QIcon icon = QIcon::fromTheme(p.themeIcon);
         if (icon.isNull()) icon = style()->standardIcon(QStyle::SP_DirIcon);
@@ -142,6 +152,7 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     centerSplitter->setStretchFactor(0, 0);
     centerSplitter->setStretchFactor(1, 1);
     centerSplitter->setChildrenCollapsible(false);
+    centerSplitter->setSizes({150, 530});
 
     // Main layout
     auto* mainLayout = new QVBoxLayout(this);
