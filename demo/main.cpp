@@ -4,7 +4,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
-#include <QLabel>
+#include <QRadioButton>
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QGroupBox>
@@ -15,6 +15,9 @@
 #include "qxfiledialog.h"
 #include "qxdirdialog.h"
 #include "qxfilebrowser.h"
+
+static const char* fileFilter =
+    "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
 
 int main(int argc, char* argv[])
 {
@@ -46,14 +49,6 @@ int main(int argc, char* argv[])
     tabGroupLayout->addWidget(tabWidget);
     mainLayout->addWidget(tabGroup, 2);
 
-    // --- File / Dir dialog demo ---
-    auto* dialogGroup = new QGroupBox("File / Directory selection");
-    auto* dialogLayout = new QVBoxLayout(dialogGroup);
-
-    QStringList recentFiles;
-    QStringList recentDirs;
-    const QString home = QDir::homePath();
-
     // --- Log ---
     auto* logEdit = new QPlainTextEdit;
     logEdit->setReadOnly(true);
@@ -66,76 +61,110 @@ int main(int argc, char* argv[])
             logEdit->appendPlainText(action + ": accept  " + path);
     };
 
-    // Open file — 3 ways
-    auto* openGroup = new QGroupBox("Open file");
-    auto* openLayout = new QVBoxLayout(openGroup);
-    auto* openBtnRow = new QHBoxLayout;
+    // --- File dialog demo ---
+    const QString home = QDir::homePath();
+    QStringList recentDirs;
 
-    auto* openNativeBtn  = new QPushButton("Open (native)");
-    auto* openQtBtn      = new QPushButton("Open (Qt)");
-    auto* openCustomBtn  = new QPushButton("Open (custom)");
+    auto* fileGroup = new QGroupBox("File");
+    auto* fileLayout = new QVBoxLayout(fileGroup);
 
-    QObject::connect(openNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString f = QFileDialog::getOpenFileName(
-            &mainWindow, "Open File (native)", home, "All Files (*)");
-        log("open native", f);
+    auto* modeRow = new QHBoxLayout;
+    auto* openRadio = new QRadioButton("Open");
+    auto* saveRadio = new QRadioButton("Save");
+    openRadio->setChecked(true);
+    modeRow->addWidget(openRadio);
+    modeRow->addWidget(saveRadio);
+    modeRow->addStretch();
+    fileLayout->addLayout(modeRow);
+
+    auto* fileBtnRow = new QHBoxLayout;
+    auto* fileNativeBtn = new QPushButton("native");
+    auto* fileQtBtn     = new QPushButton("qt");
+    auto* fileCustomBtn = new QPushButton("custom");
+    fileBtnRow->addWidget(fileNativeBtn);
+    fileBtnRow->addWidget(fileQtBtn);
+    fileBtnRow->addWidget(fileCustomBtn);
+    fileBtnRow->addStretch();
+    fileLayout->addLayout(fileBtnRow);
+
+    QObject::connect(fileNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        if (openRadio->isChecked()) {
+            log("open native", QFileDialog::getOpenFileName(&mainWindow, "Open File", home, fileFilter));
+        } else {
+            log("save native", QFileDialog::getSaveFileName(&mainWindow, "Save File", home, fileFilter));
+        }
     });
 
-    QObject::connect(openQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QFileDialog dlg(&mainWindow, "Open File (Qt)", home, "All Files (*)");
+    QObject::connect(fileQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        QFileDialog dlg(&mainWindow, openRadio->isChecked() ? "Open File" : "Save File", home, fileFilter);
         dlg.setOption(QFileDialog::DontUseNativeDialog, true);
-        dlg.setFileMode(QFileDialog::ExistingFile);
+        if (openRadio->isChecked()) {
+            dlg.setFileMode(QFileDialog::ExistingFile);
+        } else {
+            dlg.setAcceptMode(QFileDialog::AcceptSave);
+        }
+        const QString tag = openRadio->isChecked() ? "open qt" : "save qt";
         if (dlg.exec() == QDialog::Accepted)
-            log("open qt", dlg.selectedFiles().first());
+            log(tag, dlg.selectedFiles().first());
         else
-            log("open qt");
+            log(tag);
     });
 
-    QObject::connect(openCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString f = QxFileBrowser::getOpenFileName(
-            &mainWindow, "Open File (custom)", home,
-            "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)");
-        log("open custom", f);
+    QObject::connect(fileCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        if (openRadio->isChecked()) {
+            log("open custom", QxFileBrowser::getOpenFileName(
+                &mainWindow, "Open File", home, fileFilter));
+        } else {
+            log("save custom", QxFileBrowser::getSaveFileName(
+                &mainWindow, "Save File", home, fileFilter));
+        }
     });
 
-    openBtnRow->addWidget(openNativeBtn);
-    openBtnRow->addWidget(openQtBtn);
-    openBtnRow->addWidget(openCustomBtn);
-    openLayout->addLayout(openBtnRow);
-
-    // Save file
-    auto* saveGroup = new QGroupBox("Save file");
-    auto* saveLayout = new QVBoxLayout(saveGroup);
-    auto* saveBtn = new QPushButton("Save File...");
-    QObject::connect(saveBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString f = QxFileDialog::getSaveFileName(
-            &mainWindow, "Save File", home, "Text Files (*.txt);;All Files (*)", &recentFiles);
-        log("save", f);
-    });
-    saveLayout->addWidget(saveBtn);
-
-    // Select directory
-    auto* dirGroup = new QGroupBox("Select directory");
+    // --- Directory dialog demo ---
+    auto* dirGroup = new QGroupBox("Directory");
     auto* dirLayout = new QVBoxLayout(dirGroup);
-    auto* dirBtn = new QPushButton("Select Directory...");
-    QObject::connect(dirBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString d = QxDirDialog::getExistingDirectory(
-            &mainWindow, "Select Directory", home, &recentDirs);
-        log("dir", d);
+
+    auto* dirBtnRow = new QHBoxLayout;
+    auto* dirNativeBtn = new QPushButton("native");
+    auto* dirQtBtn     = new QPushButton("qt");
+    auto* dirCustomBtn = new QPushButton("custom");
+    dirBtnRow->addWidget(dirNativeBtn);
+    dirBtnRow->addWidget(dirQtBtn);
+    dirBtnRow->addWidget(dirCustomBtn);
+    dirBtnRow->addStretch();
+    dirLayout->addLayout(dirBtnRow);
+
+    QObject::connect(dirNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        log("dir native", QFileDialog::getExistingDirectory(&mainWindow, "Select Directory", home));
     });
-    dirLayout->addWidget(dirBtn);
+
+    QObject::connect(dirQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        QFileDialog dlg(&mainWindow, "Select Directory", home);
+        dlg.setOption(QFileDialog::DontUseNativeDialog, true);
+        dlg.setFileMode(QFileDialog::Directory);
+        if (dlg.exec() == QDialog::Accepted)
+            log("dir qt", dlg.selectedFiles().first());
+        else
+            log("dir qt");
+    });
+
+    QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        log("dir custom", QxDirDialog::getExistingDirectory(
+            &mainWindow, "Select Directory", home, &recentDirs));
+    });
 
     auto* dialogRowLayout = new QHBoxLayout;
-    dialogRowLayout->addWidget(openGroup, 3);
-    dialogRowLayout->addWidget(saveGroup, 1);
+    dialogRowLayout->addWidget(fileGroup, 2);
     dialogRowLayout->addWidget(dirGroup, 1);
 
+    auto* dialogGroup = new QGroupBox("Dialogs");
+    auto* dialogLayout = new QVBoxLayout(dialogGroup);
     dialogLayout->addLayout(dialogRowLayout);
     mainLayout->addWidget(dialogGroup);
 
     auto* logGroup = new QGroupBox("Log");
-    auto* logGroupLayout = new QVBoxLayout(logGroup);
-    logGroupLayout->addWidget(logEdit);
+    auto* logLayout = new QVBoxLayout(logGroup);
+    logLayout->addWidget(logEdit);
     mainLayout->addWidget(logGroup);
 
     mainWindow.resize(860, 680);
