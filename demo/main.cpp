@@ -116,7 +116,7 @@ int main(int argc, char* argv[])
                 &mainWindow, "Open File", home, fileFilter));
         } else {
             log("save custom", QxFileBrowser::getSaveFileName(
-                &mainWindow, "Save File", home, fileFilter));
+                &mainWindow, "Save File", home, fileFilter, "untitled.txt"));
         }
     });
 

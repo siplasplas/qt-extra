@@ -25,6 +25,7 @@ public:
     void    setNameFilter(const QString& filter);
     void    setDefaultSuffix(const QString& suffix);
     void    setSizeUnit(SizeUnit unit);
+    void    setFileName(const QString& name);
     QString selectedFile() const;
 
     static QString getOpenFileName(QWidget* parent,
@@ -34,7 +35,11 @@ public:
     static QString getSaveFileName(QWidget* parent,
                                    const QString& caption,
                                    const QString& dir,
-                                   const QString& filter = QString());
+                                   const QString& filter = QString(),
+                                   const QString& defaultName = {});
+
+protected:
+    void showEvent(QShowEvent* event) override;
 
 protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
