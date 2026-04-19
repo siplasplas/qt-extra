@@ -93,7 +93,8 @@ int main(int argc, char* argv[])
 
     QObject::connect(openCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         QString f = QxFileBrowser::getOpenFileName(
-            &mainWindow, "Open File (custom)", home, "All Files (*)");
+            &mainWindow, "Open File (custom)", home,
+            "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)");
         log("open custom", f);
     });
 

@@ -134,12 +134,10 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     auto* cancelBtn = new QPushButton("Cancel");
     m_acceptBtn->setDefault(true);
 
-    auto* bottomGrid = new QGridLayout;
-    bottomGrid->addWidget(new QLabel("File name:"), 0, 0);
-    bottomGrid->addWidget(m_fileEdit,               0, 1);
-    bottomGrid->addWidget(new QLabel("File type:"), 1, 0);
-    bottomGrid->addWidget(m_filterCombo,            1, 1);
-    bottomGrid->setColumnStretch(1, 1);
+    auto* bottomLayout = new QHBoxLayout;
+    bottomLayout->addWidget(new QLabel("File name:"));
+    bottomLayout->addWidget(m_fileEdit, 1);
+    bottomLayout->addWidget(m_filterCombo);
 
     auto* btnLayout = new QHBoxLayout;
     btnLayout->addStretch();
@@ -158,7 +156,7 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->addLayout(navLayout);
     mainLayout->addWidget(centerSplitter, 1);
-    mainLayout->addLayout(bottomGrid);
+    mainLayout->addLayout(bottomLayout);
     mainLayout->addLayout(btnLayout);
 
     // Connections
