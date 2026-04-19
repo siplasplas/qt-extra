@@ -120,8 +120,11 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     m_backBtn    = new QToolButton; m_backBtn->setText("←");
     m_forwardBtn = new QToolButton; m_forwardBtn->setText("→");
     m_upBtn      = new QToolButton; m_upBtn->setText("↑");
-    m_pathEdit   = new QLineEdit;
-    m_pathEdit->setPlaceholderText("Path — type or paste and press Enter");
+    m_pathEdit = new QComboBox;
+    m_pathEdit->setEditable(true);
+    m_pathEdit->setInsertPolicy(QComboBox::NoInsert);
+    m_pathEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_pathEdit->lineEdit()->setPlaceholderText("Path — type or paste and press Enter");
 
     auto* navLayout = new QHBoxLayout;
     navLayout->addWidget(m_backBtn);
@@ -176,7 +179,9 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     connect(m_backBtn,    &QToolButton::clicked, this, &QxFileBrowser::goBack);
     connect(m_forwardBtn, &QToolButton::clicked, this, &QxFileBrowser::goForward);
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileBrowser::goUp);
-    m_pathEdit->installEventFilter(this);
+    m_pathEdit->lineEdit()->installEventFilter(this);
+    connect(m_pathEdit, QOverload<int>::of(&QComboBox::activated), this,
+            [this](int) { navigateTo(m_pathEdit->currentText()); });
     connect(m_fileEdit->lineEdit(), &QLineEdit::returnPressed,
             this, &QxFileBrowser::onFileEditReturnPressed);
     connect(m_view, &QTreeView::activated, this, &QxFileBrowser::onItemActivated);
@@ -225,11 +230,26 @@ void QxFileBrowser::setFileName(const QString& name)
 
 void QxFileBrowser::setHistory(const QStringList& paths)
 {
+    // Bottom combo: full paths
     m_fileEdit->blockSignals(true);
     m_fileEdit->clear();
     m_fileEdit->addItems(paths);
     m_fileEdit->clearEditText();
     m_fileEdit->blockSignals(false);
+
+    // Top path combo: unique parent directories, preserving order
+    QStringList dirs;
+    for (const QString& p : paths) {
+        QString dir = QFileInfo(p).isDir() ? p : QFileInfo(p).path();
+        if (!dir.isEmpty() && !dirs.contains(dir))
+            dirs.append(dir);
+    }
+    const QString current = m_pathEdit->currentText();
+    m_pathEdit->blockSignals(true);
+    m_pathEdit->clear();
+    m_pathEdit->addItems(dirs);
+    m_pathEdit->setCurrentText(current);
+    m_pathEdit->blockSignals(false);
 }
 
 void QxFileBrowser::setDefaultSuffix(const QString& suffix)
@@ -271,7 +291,7 @@ void QxFileBrowser::navigateTo(const QString& path, bool pushToHistory)
     }
 
     m_currentPath = canonical;
-    m_pathEdit->setText(canonical);
+    m_pathEdit->setCurrentText(canonical);
     m_view->setRootIndex(m_model->index(canonical));
     m_view->clearSelection();
     if (m_mode == Directory) m_fileEdit->clearEditText();
@@ -342,7 +362,7 @@ void QxFileBrowser::onCurrentItemChanged(const QModelIndex& current)
 
 bool QxFileBrowser::eventFilter(QObject* obj, QEvent* event)
 {
-    if (obj == m_pathEdit && event->type() == QEvent::KeyPress) {
+    if (obj == m_pathEdit->lineEdit() && event->type() == QEvent::KeyPress) {
         const auto* ke = static_cast<QKeyEvent*>(event);
         if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
             onPathEditReturnPressed();
@@ -354,7 +374,7 @@ bool QxFileBrowser::eventFilter(QObject* obj, QEvent* event)
 
 void QxFileBrowser::onPathEditReturnPressed()
 {
-    const QString text = m_pathEdit->text().trimmed();
+    const QString text = m_pathEdit->currentText().trimmed();
     QFileInfo info(text);
     if (info.isDir()) {
         navigateTo(text);

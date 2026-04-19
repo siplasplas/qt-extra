@@ -74,7 +74,7 @@ private:
     QFileSystemModel* m_model;
     QListWidget*      m_places;
     QTreeView*        m_view;
-    QLineEdit*        m_pathEdit;
+    QComboBox*        m_pathEdit;
     QComboBox*        m_fileEdit;
     QComboBox*        m_filterCombo;
     QToolButton*      m_backBtn;
