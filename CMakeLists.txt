@@ -20,6 +20,7 @@ add_library(qt-extra STATIC
     widgets/mrutabwidget.cpp
     widgets/qxfiledialog.cpp
     widgets/qxdirdialog.cpp
+    widgets/qxfilebrowser.cpp
 )
 
 target_include_directories(qt-extra
@@ -41,6 +42,7 @@ install(FILES
     widgets/mrutabwidget.h
     widgets/qxfiledialog.h
     widgets/qxdirdialog.h
+    widgets/qxfilebrowser.h
     DESTINATION include/qt-extra
 )
 install(EXPORT qt-extra-targets
