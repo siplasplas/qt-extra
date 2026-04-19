@@ -13,7 +13,6 @@
 
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
-#include "qxdirdialog.h"
 #include "qxfilebrowser.h"
 
 static const char* fileFilter =
@@ -63,7 +62,6 @@ int main(int argc, char* argv[])
 
     // --- File dialog demo ---
     const QString home = QDir::homePath();
-    QStringList recentDirs;
 
     auto* fileGroup = new QGroupBox("File");
     auto* fileLayout = new QVBoxLayout(fileGroup);
@@ -149,8 +147,8 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        log("dir custom", QxDirDialog::getExistingDirectory(
-            &mainWindow, "Select Directory", home, &recentDirs));
+        log("dir custom", QxFileBrowser::getExistingDirectory(
+            &mainWindow, "Select Directory", home));
     });
 
     auto* dialogRowLayout = new QHBoxLayout;

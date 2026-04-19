@@ -57,13 +57,15 @@ private:
 QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     : QDialog(parent), m_mode(mode)
 {
-    setWindowTitle(mode == Open ? "Open File" : "Save File");
+    setWindowTitle(mode == Open ? "Open File" : mode == Save ? "Save File" : "Select Directory");
     resize(720, 520);
 
     // Model — watch full filesystem; view root index will select the directory
     m_model = new DateFileSystemModel(this);
     m_model->setRootPath(QDir::rootPath());
-    m_model->setFilter(QDir::AllEntries | QDir::NoDotAndDotDot);
+    m_model->setFilter(mode == Directory
+        ? QDir::Dirs  | QDir::NoDotAndDotDot
+        : QDir::AllEntries | QDir::NoDotAndDotDot);
 
     // Places panel (left)
     m_places = new QListWidget;
@@ -107,7 +109,8 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     m_view->setRootIsDecorated(false);
     m_view->setSortingEnabled(true);
     m_view->sortByColumn(0, Qt::AscendingOrder);
-    m_view->setColumnHidden(2, true);          // hide "Type" column
+    m_view->setColumnHidden(1, mode == Directory); // hide Size in dir mode
+    m_view->setColumnHidden(2, true);              // hide "Type" column
     m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
     m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
@@ -130,14 +133,17 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     m_fileEdit    = new QLineEdit;
     m_filterCombo = new QComboBox;
     m_filterCombo->setMinimumWidth(200);
-    m_acceptBtn   = new QPushButton(mode == Open ? "Open" : "Save");
+    m_acceptBtn   = new QPushButton(mode == Open ? "Open" : mode == Save ? "Save" : "Choose");
     auto* cancelBtn = new QPushButton("Cancel");
     m_acceptBtn->setDefault(true);
 
     auto* bottomLayout = new QHBoxLayout;
-    bottomLayout->addWidget(new QLabel("File name:"));
+    bottomLayout->addWidget(new QLabel(mode == Directory ? "Dir name:" : "File name:"));
     bottomLayout->addWidget(m_fileEdit, 1);
-    bottomLayout->addWidget(m_filterCombo);
+    if (mode != Directory)
+        bottomLayout->addWidget(m_filterCombo);
+    else
+        m_filterCombo->hide();
 
     auto* btnLayout = new QHBoxLayout;
     btnLayout->addStretch();
@@ -221,7 +227,8 @@ void QxFileBrowser::setDefaultSuffix(const QString& suffix)
 QString QxFileBrowser::selectedFile() const
 {
     QString name = m_fileEdit->text().trimmed();
-    if (name.isEmpty()) return {};
+    if (name.isEmpty())
+        return m_mode == Directory ? m_currentPath : QString{};
     if (QFileInfo(name).isAbsolute()) return name;
     return QDir(m_currentPath).filePath(name);
 }
@@ -254,6 +261,7 @@ void QxFileBrowser::navigateTo(const QString& path, bool pushToHistory)
     m_pathEdit->setText(canonical);
     m_view->setRootIndex(m_model->index(canonical));
     m_view->clearSelection();
+    if (m_mode == Directory) m_fileEdit->clear();
     updateNavButtons();
 }
 
@@ -310,10 +318,13 @@ void QxFileBrowser::onItemActivated(const QModelIndex& index)
 void QxFileBrowser::onCurrentItemChanged(const QModelIndex& current)
 {
     if (!current.isValid()) return;
-    if (m_model->isDir(current))
-        m_fileEdit->clear();
-    else
+    if (m_mode == Directory) {
         m_fileEdit->setText(m_model->fileName(current));
+    } else if (m_model->isDir(current)) {
+        m_fileEdit->clear();
+    } else {
+        m_fileEdit->setText(m_model->fileName(current));
+    }
 }
 
 bool QxFileBrowser::eventFilter(QObject* obj, QEvent* event)
@@ -358,6 +369,12 @@ bool QxFileBrowser::tryAccept()
 {
     QString file = selectedFile();
     if (file.isEmpty()) return false;
+
+    if (m_mode == Directory) {
+        if (!QDir(file).exists()) return false;
+        accept();
+        return true;
+    }
 
     // Apply default suffix in Save mode when no extension given
     if (m_mode == Save && !m_defaultSuffix.isEmpty()) {
@@ -419,5 +436,14 @@ QString QxFileBrowser::getSaveFileName(QWidget* parent, const QString& caption,
     if (!dir.isEmpty())        dlg.setDirectory(dir);
     if (!filter.isEmpty())     dlg.setNameFilter(filter);
     if (!defaultName.isEmpty()) dlg.setFileName(defaultName);
+    return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
+}
+
+QString QxFileBrowser::getExistingDirectory(QWidget* parent, const QString& caption,
+                                             const QString& dir)
+{
+    QxFileBrowser dlg(parent, Directory);
+    if (!caption.isEmpty()) dlg.setWindowTitle(caption);
+    if (!dir.isEmpty())     dlg.setDirectory(dir);
     return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
 }

@@ -16,7 +16,7 @@ class QxFileBrowser : public QDialog
 {
     Q_OBJECT
 public:
-    enum Mode     { Open, Save };
+    enum Mode     { Open, Save, Directory };
     enum SizeUnit { SizeSI = 1000, SizeIEC = 1024 };
 
     explicit QxFileBrowser(QWidget* parent = nullptr, Mode mode = Open);
@@ -37,6 +37,9 @@ public:
                                    const QString& dir,
                                    const QString& filter = QString(),
                                    const QString& defaultName = {});
+    static QString getExistingDirectory(QWidget* parent,
+                                        const QString& caption,
+                                        const QString& dir);
 
 protected:
     void showEvent(QShowEvent* event) override;
