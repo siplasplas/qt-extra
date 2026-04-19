@@ -31,9 +31,12 @@ public:
                                    const QString& dir,
                                    const QString& filter = QString());
 
+protected:
+    bool eventFilter(QObject* obj, QEvent* event) override;
+
 private slots:
     void onItemActivated(const QModelIndex& index);
-    void onItemClicked(const QModelIndex& index);
+    void onCurrentItemChanged(const QModelIndex& current);
     void onPathEditReturnPressed();
     void onFileEditReturnPressed();
     void onFilterChanged(int index);

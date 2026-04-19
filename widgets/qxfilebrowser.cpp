@@ -8,12 +8,14 @@
 #include <QLineEdit>
 #include <QComboBox>
 #include <QTreeView>
+#include <QItemSelectionModel>
 #include <QHeaderView>
 #include <QFileSystemModel>
 #include <QLabel>
 #include <QDir>
 #include <QFileInfo>
 #include <QDateTime>
+#include <QKeyEvent>
 
 // QFileSystemModel subclass — overrides date column to use yyyy-MM-dd HH:mm format
 class DateFileSystemModel : public QFileSystemModel {
@@ -93,10 +95,13 @@ QxFileBrowser::QxFileBrowser(QWidget* parent, Mode mode)
     connect(m_backBtn,    &QToolButton::clicked, this, &QxFileBrowser::goBack);
     connect(m_forwardBtn, &QToolButton::clicked, this, &QxFileBrowser::goForward);
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileBrowser::goUp);
-    connect(m_pathEdit,   &QLineEdit::returnPressed, this, &QxFileBrowser::onPathEditReturnPressed);
+    m_pathEdit->installEventFilter(this);
     connect(m_fileEdit,   &QLineEdit::returnPressed, this, &QxFileBrowser::onFileEditReturnPressed);
     connect(m_view, &QTreeView::activated, this, &QxFileBrowser::onItemActivated);
-    connect(m_view, &QTreeView::clicked,   this, &QxFileBrowser::onItemClicked);
+    connect(m_view->selectionModel(), &QItemSelectionModel::currentChanged,
+            this, [this](const QModelIndex& current, const QModelIndex&) {
+                onCurrentItemChanged(current);
+            });
     connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &QxFileBrowser::onFilterChanged);
     connect(m_acceptBtn, &QPushButton::clicked, this, [this]{ tryAccept(); });
@@ -206,10 +211,25 @@ void QxFileBrowser::onItemActivated(const QModelIndex& index)
     }
 }
 
-void QxFileBrowser::onItemClicked(const QModelIndex& index)
+void QxFileBrowser::onCurrentItemChanged(const QModelIndex& current)
 {
-    if (!m_model->isDir(index))
-        m_fileEdit->setText(m_model->fileName(index));
+    if (!current.isValid()) return;
+    if (m_model->isDir(current))
+        m_fileEdit->clear();
+    else
+        m_fileEdit->setText(m_model->fileName(current));
+}
+
+bool QxFileBrowser::eventFilter(QObject* obj, QEvent* event)
+{
+    if (obj == m_pathEdit && event->type() == QEvent::KeyPress) {
+        const auto* ke = static_cast<QKeyEvent*>(event);
+        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+            onPathEditReturnPressed();
+            return true;  // consume — prevents QDialog default button from also firing
+        }
+    }
+    return QDialog::eventFilter(obj, event);
 }
 
 void QxFileBrowser::onPathEditReturnPressed()
@@ -218,14 +238,13 @@ void QxFileBrowser::onPathEditReturnPressed()
     QFileInfo info(text);
     if (info.isDir()) {
         navigateTo(text);
-    } else if (info.isFile()) {
-        navigateTo(info.dir().canonicalPath());
-        m_fileEdit->setText(info.fileName());
-        if (m_mode == Open) tryAccept();
-    }
-    // If path doesn't exist yet (Save mode), keep it as typed filename
-    else if (m_mode == Save) {
-        m_fileEdit->setText(text);
+    } else {
+        // Not a directory — navigate to parent if it exists, put filename in file edit
+        QDir parent = info.dir();
+        if (parent.exists()) {
+            navigateTo(parent.canonicalPath());
+            m_fileEdit->setText(info.fileName());
+        }
     }
 }
 
