@@ -37,13 +37,23 @@ int main(int argc, char* argv[])
     tabWidget->setTabsClosable(true);
     tabWidget->setMinimalTabCount(1);
 
-    const QStringList tabNames = {"main.cpp", "widget.h", "CMakeLists.txt", "README.md", "dialog.cpp"};
-    for (const QString& name : tabNames) {
+    // Short tab title + a longer path shown only in the Ctrl+Tab popup.
+    const QList<QPair<QString, QString>> tabInfo = {
+        {"main.cpp",       "demo/main.cpp"},
+        {"widget.h",       "widgets/mrutabwidget.h"},
+        {"CMakeLists.txt", "CMakeLists.txt"},
+        {"README.md",      "docs/README.md"},
+        {"dialog.cpp",     "widgets/qxfiledialog.cpp"},
+    };
+    for (const auto& info : tabInfo) {
         auto* editor = new QTextEdit;
         editor->setPlainText(
             QString("// %1\n\nPress Ctrl+Tab to navigate with MRU popup.\n"
-                    "Right-click a tab for context menu (pin, close, etc.)").arg(name));
-        tabWidget->addTab(editor, name);
+                    "The popup shows the full path \"%2\" instead of the tab title.\n"
+                    "Right-click a tab for context menu (pin, close, etc.)")
+                .arg(info.first, info.second));
+        int idx = tabWidget->addTab(editor, info.first);
+        tabWidget->setTabPopupText(idx, info.second);
     }
     tabGroupLayout->addWidget(tabWidget);
     mainLayout->addWidget(tabGroup, 2);

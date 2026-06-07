@@ -736,7 +736,7 @@ void MruTabWidget::showMruPopup()
     // Populate the list widget based on the new order
     for (int tabIndex : tabsToShowOrder) {
         if (tabIndex >= 0 && tabIndex < count()) {
-            QListWidgetItem *item = new QListWidgetItem(tabText(tabIndex), m_mruListWidget);
+            QListWidgetItem *item = new QListWidgetItem(tabPopupText(tabIndex), m_mruListWidget);
             item->setData(Qt::UserRole, tabIndex); // Store the tab index
             item->setIcon(tabIcon(tabIndex));
             m_mruListWidget->addItem(item);
@@ -1060,6 +1060,8 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
     QString  otherText   = other->tabText(otherIndex);
     QIcon    thisIcon    = tabIcon(thisIndex);
     QIcon    otherIcon   = other->tabIcon(otherIndex);
+    QVariant thisData    = tabBar()->tabData(thisIndex);
+    QVariant otherData   = other->tabBar()->tabData(otherIndex);
     bool     thisPinned  = isTabPinned(thisIndex);
     bool     otherPinned = other->isTabPinned(otherIndex);
 
@@ -1071,8 +1073,10 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
 
     insertTab(thisIndex, otherWidget, otherText);
     setTabIcon(thisIndex, otherIcon);
+    tabBar()->setTabData(thisIndex, otherData);
     other->insertTab(otherIndex, thisWidget, thisText);
     other->setTabIcon(otherIndex, thisIcon);
+    other->tabBar()->setTabData(otherIndex, thisData);
 
     setCurrentIndex(thisIndex);
     other->setCurrentIndex(otherIndex);
@@ -1103,6 +1107,19 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
     // Restore currentChanged state
     onCurrentChanged(currentIndex());
     other->onCurrentChanged(other->currentIndex());
+}
+
+void MruTabWidget::setTabPopupText(int index, const QString& text)
+{
+    if (index < 0 || index >= count()) return;
+    tabBar()->setTabData(index, text);
+}
+
+QString MruTabWidget::tabPopupText(int index) const
+{
+    if (index < 0 || index >= count()) return {};
+    const QString text = tabBar()->tabData(index).toString();
+    return text.isEmpty() ? tabText(index) : text;
 }
 
 void MruTabWidget::setTabPinned(int tabIndex, bool pinned)

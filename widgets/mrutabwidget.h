@@ -97,6 +97,23 @@ public:
     void swapTabs(int a, int b);
     void swapExternal(MruTabWidget* other, int thisIndex, int otherIndex);
 
+    /**
+     * @brief Sets the text shown for a tab in the Ctrl+Tab MRU popup.
+     * @param index Tab index
+     * @param text  Text to display in the popup
+     *
+     * The tab's title (tabText) is what gets drawn on the tab itself; this
+     * property is drawn instead in the MRU popup. When empty (default), the
+     * popup falls back to tabText. Typically a longer string than the title,
+     * e.g. a tab titled "subdir" with a popup text "subdir1/subdir2".
+     */
+    void    setTabPopupText(int index, const QString& text);
+
+    /**
+     * @brief Returns the popup text for a tab, or tabText() when none is set.
+     */
+    QString tabPopupText(int index) const;
+
     /// @brief Sets tab switching mode (false = MRU popup, true = sequential)
     void setSequentialTabSwitching(bool sequential) { m_sequentialTabSwitching = sequential; }
     bool sequentialTabSwitching() const { return m_sequentialTabSwitching; }
