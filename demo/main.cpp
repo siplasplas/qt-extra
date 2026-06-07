@@ -62,7 +62,7 @@ int main(int argc, char* argv[])
 
     // --- File dialog demo ---
     const QString home = QDir::homePath();
-    QStringList fileHistory, dirHistory;
+    QStringList fileHistory, dirHistory, fileRecent;
     auto addToHistory = [](QStringList& list, const QString& path) {
         if (path.isEmpty()) return;
         list.removeAll(path);
@@ -82,12 +82,14 @@ int main(int argc, char* argv[])
     fileLayout->addLayout(modeRow);
 
     auto* fileBtnRow = new QHBoxLayout;
-    auto* fileNativeBtn = new QPushButton("native");
-    auto* fileQtBtn     = new QPushButton("qt");
-    auto* fileCustomBtn = new QPushButton("custom");
+    auto* fileNativeBtn  = new QPushButton("native");
+    auto* fileQtBtn      = new QPushButton("qt");
+    auto* fileBrowserBtn = new QPushButton("browser");
+    auto* fileDialogBtn  = new QPushButton("dialog");
     fileBtnRow->addWidget(fileNativeBtn);
     fileBtnRow->addWidget(fileQtBtn);
-    fileBtnRow->addWidget(fileCustomBtn);
+    fileBtnRow->addWidget(fileBrowserBtn);
+    fileBtnRow->addWidget(fileDialogBtn);
     fileBtnRow->addStretch();
     fileLayout->addLayout(fileBtnRow);
 
@@ -114,17 +116,29 @@ int main(int argc, char* argv[])
             log(tag);
     });
 
-    QObject::connect(fileCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+    QObject::connect(fileBrowserBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
             QString f = QxFileBrowser::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, fileHistory);
             addToHistory(fileHistory, f);
-            log("open custom", f);
+            log("open browser", f);
         } else {
             QString f = QxFileBrowser::getSaveFileName(
                 &mainWindow, "Save File", home, fileFilter, "untitled.txt", fileHistory);
             addToHistory(fileHistory, f);
-            log("save custom", f);
+            log("save browser", f);
+        }
+    });
+
+    QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        if (openRadio->isChecked()) {
+            QString f = QxFileDialog::getOpenFileName(
+                &mainWindow, "Open File", home, fileFilter, &fileRecent);
+            log("open dialog", f);
+        } else {
+            QString f = QxFileDialog::getSaveFileName(
+                &mainWindow, "Save File", home, fileFilter, &fileRecent);
+            log("save dialog", f);
         }
     });
 
