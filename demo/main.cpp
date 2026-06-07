@@ -12,8 +12,8 @@
 #include <QFileDialog>
 
 #include "mrutabwidget.h"
+#include "qxrecentfiledialog.h"
 #include "qxfiledialog.h"
-#include "qxfilebrowser.h"
 
 static const char* fileFilter =
     "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
@@ -118,12 +118,12 @@ int main(int argc, char* argv[])
 
     QObject::connect(fileBrowserBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
-            QString f = QxFileBrowser::getOpenFileName(
+            QString f = QxFileDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, fileHistory);
             addToHistory(fileHistory, f);
             log("open browser", f);
         } else {
-            QString f = QxFileBrowser::getSaveFileName(
+            QString f = QxFileDialog::getSaveFileName(
                 &mainWindow, "Save File", home, fileFilter, "untitled.txt", fileHistory);
             addToHistory(fileHistory, f);
             log("save browser", f);
@@ -132,11 +132,11 @@ int main(int argc, char* argv[])
 
     QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
-            QString f = QxFileDialog::getOpenFileName(
+            QString f = QxRecentFileDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, &fileRecent);
             log("open dialog", f);
         } else {
-            QString f = QxFileDialog::getSaveFileName(
+            QString f = QxRecentFileDialog::getSaveFileName(
                 &mainWindow, "Save File", home, fileFilter, &fileRecent);
             log("save dialog", f);
         }
@@ -171,7 +171,7 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString d = QxFileBrowser::getExistingDirectory(
+        QString d = QxFileDialog::getExistingDirectory(
             &mainWindow, "Select Directory", home, dirHistory);
         addToHistory(dirHistory, d);
         log("dir custom", d);

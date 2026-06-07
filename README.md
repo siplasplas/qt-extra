@@ -9,12 +9,18 @@ Extra Qt widgets and utilities designed to be included as a Git submodule.
 tab pinning, configurable tab limits, and context-sensitive close buttons.
 
 ### QxFileDialog
-File open/save dialog that displays a built-in recently-used files list.
-The caller owns and persists the list — pass it in, get the updated list back.
+Full file-system browser dialog (open/save/directory) with a tree view,
+places sidebar, navigation history, an editable path bar, and name filters.
+A drop-in alternative to `QFileDialog` with a custom, controllable UI.
+
+### QxRecentFileDialog
+Lightweight file open/save dialog that displays a built-in recently-used
+files list. The caller owns and persists the list — pass it in, get the
+updated list back.
 
 ### QxDirDialog
 Directory selection dialog with a built-in recently-used directories list.
-Same ownership model as `QxFileDialog`.
+Same ownership model as `QxRecentFileDialog`.
 
 ### Ev (common utility)
 Qt5/Qt6 compatible helpers for extracting local and global positions from mouse,
@@ -44,6 +50,7 @@ Headers are exposed automatically — no extra `include_directories()` needed:
 ```cpp
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
+#include "qxrecentfiledialog.h"
 #include "qxdirdialog.h"
 ```
 

@@ -2,69 +2,90 @@
 #include <QDialog>
 #include <QStringList>
 
+class QFileSystemModel;
 class QListWidget;
 class QListWidgetItem;
+class QTreeView;
 class QLineEdit;
+class QComboBox;
 class QPushButton;
+class QToolButton;
+class QModelIndex;
 
-/**
- * @class QxFileDialog
- * @brief File open/save dialog with a built-in recently-used files list.
- *
- * The caller owns and persists the recent-files list; pass it in via
- * setRecentFiles() and read it back via recentFiles() after the dialog closes.
- * Static convenience methods mirror the QFileDialog API.
- */
 class QxFileDialog : public QDialog
 {
     Q_OBJECT
 public:
-    enum Mode { Open, Save };
+    enum Mode     { Open, Save, Directory };
+    enum SizeUnit { SizeSI = 1000, SizeIEC = 1024 };
 
-    explicit QxFileDialog(Mode mode, QWidget* parent = nullptr);
+    explicit QxFileDialog(QWidget* parent = nullptr, Mode mode = Open);
 
-    void setRecentFiles(const QStringList& files);
-    QStringList recentFiles() const { return m_recentFiles; }
-
-    void setNameFilter(const QString& filter) { m_nameFilter = filter; }
-    void setDefaultSuffix(const QString& suffix) { m_defaultSuffix = suffix; }
-    void setInitialDirectory(const QString& dir) { m_directory = dir; }
-
-    QString selectedFile() const { return m_selectedFile; }
+    void    setDirectory(const QString& path);
+    void    setNameFilter(const QString& filter);
+    void    setDefaultSuffix(const QString& suffix);
+    void    setSizeUnit(SizeUnit unit);
+    void    setFileName(const QString& name);
+    void    setHistory(const QStringList& paths);
+    QString selectedFile() const;
 
     static QString getOpenFileName(QWidget* parent,
-                                   const QString& title,
+                                   const QString& caption,
                                    const QString& dir,
-                                   const QString& nameFilter,
-                                   QStringList* recentFiles = nullptr);
-
+                                   const QString& filter = {},
+                                   const QStringList& history = {});
     static QString getSaveFileName(QWidget* parent,
-                                   const QString& title,
+                                   const QString& caption,
                                    const QString& dir,
-                                   const QString& nameFilter,
-                                   QStringList* recentFiles = nullptr);
+                                   const QString& filter = {},
+                                   const QString& defaultName = {},
+                                   const QStringList& history = {});
+    static QString getExistingDirectory(QWidget* parent,
+                                        const QString& caption,
+                                        const QString& dir,
+                                        const QStringList& history = {});
+
+protected:
+    void showEvent(QShowEvent* event) override;
+    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
-    void onBrowse();
-    void onRecentItemClicked(QListWidgetItem* item);
-    void onRecentItemDoubleClicked(QListWidgetItem* item);
-    void onAccept();
+    void onItemActivated(const QModelIndex& index);
+    void onCurrentItemChanged(const QModelIndex& current);
+    void onPathEditReturnPressed();
+    void onFileEditReturnPressed();
+    void onFilterChanged(int index);
 
 private:
-    void setupUi();
-    void updateRecentList();
-    void addToRecent(const QString& filePath);
+    void navigateTo(const QString& path, bool pushToHistory = true);
+    void goBack();
+    void goForward();
+    void goUp();
+    void updateNavButtons();
+    void applyCurrentFilter();
+    bool tryAccept();
 
-    static constexpr int MAX_RECENT = 15;
+    struct FilterEntry {
+        QString     display;
+        QStringList patterns;
+    };
+    QList<FilterEntry> parseFilter(const QString& filter);
+
+    QFileSystemModel* m_model;
+    QListWidget*      m_places;
+    QTreeView*        m_view;
+    QComboBox*        m_pathEdit;
+    QComboBox*        m_fileEdit;
+    QComboBox*        m_filterCombo;
+    QToolButton*      m_backBtn;
+    QToolButton*      m_forwardBtn;
+    QToolButton*      m_upBtn;
+    QPushButton*      m_acceptBtn;
 
     Mode        m_mode;
-    QString     m_nameFilter;
+    QString     m_currentPath;
     QString     m_defaultSuffix;
-    QString     m_directory;
-    QString     m_selectedFile;
-    QStringList m_recentFiles;
-
-    QListWidget* m_recentListWidget = nullptr;
-    QLineEdit*   m_fileEdit         = nullptr;
-    QPushButton* m_okButton         = nullptr;
+    QStringList m_history;
+    int         m_historyPos = -1;
+    QList<FilterEntry> m_filters;
 };
