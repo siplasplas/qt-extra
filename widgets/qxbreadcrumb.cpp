@@ -9,7 +9,7 @@ QxBreadcrumb::QxBreadcrumb(QWidget* parent)
     : QWidget(parent), m_layout(new QHBoxLayout(this))
 {
     m_layout->setContentsMargins(0, 0, 0, 0);
-    m_layout->setSpacing(2);
+    m_layout->setSpacing(1);
 }
 
 void QxBreadcrumb::setSegments(const QStringList& labels)
@@ -27,6 +27,7 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
         auto* segment = new QToolButton(this);
         segment->setText(m_segments.at(index));
         segment->setAutoRaise(true);
+        segment->setStyleSheet("QToolButton { padding: 0px 2px; }");
         connect(segment, &QToolButton::clicked, this,
                 [this, index]() { emit segmentActivated(index); });
         m_layout->addWidget(segment);
@@ -34,7 +35,7 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
         auto* arrow = new QToolButton(this);
         arrow->setText(QStringLiteral(">"));
         arrow->setAutoRaise(true);
-        arrow->setPopupMode(QToolButton::InstantPopup);
+        arrow->setStyleSheet("QToolButton { border: none; padding: 0px; }");
         QFont font = arrow->font();
         font.setBold(true);
         font.setPointSize(font.pointSize() + 3);
@@ -46,7 +47,9 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
             if (menu->isEmpty())
                 menu->addAction(tr("No items"))->setEnabled(false);
         });
-        arrow->setMenu(menu);
+        connect(arrow, &QToolButton::clicked, this, [arrow, menu]() {
+            menu->popup(arrow->mapToGlobal(QPoint(0, arrow->height())));
+        });
         m_layout->addWidget(arrow);
     }
     m_layout->addStretch();
