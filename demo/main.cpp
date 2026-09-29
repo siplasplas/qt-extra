@@ -12,8 +12,9 @@
 #include <QFileDialog>
 
 #include "mrutabwidget.h"
-#include "qxrecentfiledialog.h"
+#include "qxdirdialog.h"
 #include "qxfiledialog.h"
+#include "qxrecentfiledialog.h"
 
 static const char* fileFilter =
     "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
@@ -93,13 +94,13 @@ int main(int argc, char* argv[])
 
     auto* fileBtnRow = new QHBoxLayout;
     auto* fileNativeBtn  = new QPushButton("native");
-    auto* fileQtBtn      = new QPushButton("qt");
-    auto* fileBrowserBtn = new QPushButton("browser");
-    auto* fileDialogBtn  = new QPushButton("dialog");
+    auto* fileQtBtn      = new QPushButton("Qt");
+    auto* fileDialogBtn = new QPushButton("custom");
+    auto* fileRecentBtn  = new QPushButton("recent files");
     fileBtnRow->addWidget(fileNativeBtn);
     fileBtnRow->addWidget(fileQtBtn);
-    fileBtnRow->addWidget(fileBrowserBtn);
     fileBtnRow->addWidget(fileDialogBtn);
+    fileBtnRow->addWidget(fileRecentBtn);
     fileBtnRow->addStretch();
     fileLayout->addLayout(fileBtnRow);
 
@@ -126,7 +127,7 @@ int main(int argc, char* argv[])
             log(tag);
     });
 
-    QObject::connect(fileBrowserBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+    QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
             QString f = QxFileDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, fileHistory);
@@ -140,7 +141,7 @@ int main(int argc, char* argv[])
         }
     });
 
-    QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+    QObject::connect(fileRecentBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
             QString f = QxRecentFileDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, &fileRecent);
@@ -160,9 +161,11 @@ int main(int argc, char* argv[])
     auto* dirNativeBtn = new QPushButton("native");
     auto* dirQtBtn     = new QPushButton("qt");
     auto* dirCustomBtn = new QPushButton("custom");
+    auto* dirCustomDirBtn = new QPushButton("custom dir");
     dirBtnRow->addWidget(dirNativeBtn);
     dirBtnRow->addWidget(dirQtBtn);
     dirBtnRow->addWidget(dirCustomBtn);
+    dirBtnRow->addWidget(dirCustomDirBtn);
     dirBtnRow->addStretch();
     dirLayout->addLayout(dirBtnRow);
 
@@ -183,6 +186,13 @@ int main(int argc, char* argv[])
     QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         QString d = QxFileDialog::getExistingDirectory(
             &mainWindow, "Select Directory", home, dirHistory);
+        addToHistory(dirHistory, d);
+        log("dir custom", d);
+    });
+
+    QObject::connect(dirCustomDirBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        QString d = QxDirDialog::getExistingDirectory(
+            &mainWindow, "Select Directory", home);
         addToHistory(dirHistory, d);
         log("dir custom", d);
     });
