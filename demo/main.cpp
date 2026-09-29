@@ -5,6 +5,9 @@
 #include <QHBoxLayout>
 #include <QPushButton>
 #include <QRadioButton>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QLabel>
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QGroupBox>
@@ -44,29 +47,72 @@ int main(int argc, char* argv[])
     auto* tabGroup = new QGroupBox("Ctrl+Tab = MRU navigation");
     auto* tabGroupLayout = new QVBoxLayout(tabGroup);
 
-    auto* tabWidget = new MruTabWidget;
-    tabWidget->setTabsClosable(true);
-    tabWidget->setMinimalTabCount(1);
+    auto* firstTabs = new MruTabWidget;
+    auto* secondTabs = new MruTabWidget;
+    for (auto* tabs : {firstTabs, secondTabs}) {
+        tabs->setTabsClosable(true);
+        tabs->setMinimalTabCount(1);
+        tabs->setMovable(true);
+    }
 
-    // Short tab title + a longer path shown only in the Ctrl+Tab popup.
-    const QList<QPair<QString, QString>> tabInfo = {
-        {"main.cpp",       "demo/main.cpp"},
-        {"widget.h",       "widgets/mrutabwidget.h"},
-        {"CMakeLists.txt", "CMakeLists.txt"},
-        {"README.md",      "docs/README.md"},
-        {"dialog.cpp",     "widgets/qxfiledialog.cpp"},
-    };
-    for (const auto& info : tabInfo) {
+    auto addDemoTab = [](MruTabWidget* tabs, const QString& title, const QString& path) {
         auto* editor = new QTextEdit;
         editor->setPlainText(
             QString("// %1\n\nPress Ctrl+Tab to navigate with MRU popup.\n"
                     "The popup shows the full path \"%2\" instead of the tab title.\n"
-                    "Right-click a tab for context menu (pin, close, etc.)")
-                .arg(info.first, info.second));
-        int idx = tabWidget->addTab(editor, info.first);
-        tabWidget->setTabPopupText(idx, info.second);
+                    "Drag tabs to move them. Right-click a tab to pin or close it.")
+                .arg(title, path));
+        const int index = tabs->addTab(editor, title);
+        tabs->setTabPopupText(index, path);
+    };
+    addDemoTab(firstTabs, "main.cpp", "demo/main.cpp");
+    addDemoTab(firstTabs, "mrutabwidget.h", "widgets/mrutabwidget.h");
+    addDemoTab(firstTabs, "CMakeLists.txt", "CMakeLists.txt");
+    addDemoTab(secondTabs, "README.md", "README.md");
+    addDemoTab(secondTabs, "qxfiledialog.cpp", "widgets/qxfiledialog.cpp");
+    addDemoTab(secondTabs, "qxrecentdialog.cpp", "widgets/qxrecentdialog.cpp");
+
+    auto* optionsRow = new QHBoxLayout;
+    optionsRow->addWidget(new QLabel("Tab position:"));
+    auto* positionCombo = new QComboBox;
+    positionCombo->addItems({"Top", "Bottom"});
+    optionsRow->addWidget(positionCombo);
+    auto* movableCheck = new QCheckBox("Movable tabs");
+    movableCheck->setChecked(true);
+    optionsRow->addWidget(movableCheck);
+    auto* sequentialCheck = new QCheckBox("Sequential Ctrl+Tab");
+    optionsRow->addWidget(sequentialCheck);
+    auto* swapButton = new QPushButton("Swap selected tabs");
+    optionsRow->addWidget(swapButton);
+    optionsRow->addStretch();
+    tabGroupLayout->addLayout(optionsRow);
+
+    QObject::connect(positionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     [=](int index) {
+        const auto position = index == 0 ? QTabWidget::North : QTabWidget::South;
+        firstTabs->setTabPosition(position);
+        secondTabs->setTabPosition(position);
+    });
+    QObject::connect(movableCheck, &QCheckBox::toggled, [=](bool movable) {
+        firstTabs->setMovable(movable);
+        secondTabs->setMovable(movable);
+    });
+    QObject::connect(sequentialCheck, &QCheckBox::toggled, [=](bool sequential) {
+        firstTabs->setSequentialTabSwitching(sequential);
+        secondTabs->setSequentialTabSwitching(sequential);
+    });
+    QObject::connect(swapButton, &QPushButton::clicked, [=]() {
+        firstTabs->swapExternal(secondTabs, firstTabs->currentIndex(), secondTabs->currentIndex());
+    });
+
+    auto* tabSetsRow = new QHBoxLayout;
+    for (const auto& tabSet : {qMakePair(firstTabs, "Set A"), qMakePair(secondTabs, "Set B")}) {
+        auto* setGroup = new QGroupBox(tabSet.second);
+        auto* setLayout = new QVBoxLayout(setGroup);
+        setLayout->addWidget(tabSet.first);
+        tabSetsRow->addWidget(setGroup, 1);
     }
-    tabGroupLayout->addWidget(tabWidget);
+    tabGroupLayout->addLayout(tabSetsRow, 1);
     mruPageLayout->addWidget(tabGroup);
 
     // --- Log ---
