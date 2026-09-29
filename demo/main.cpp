@@ -8,6 +8,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
+#include <QListWidget>
 #include <QTextEdit>
 #include <QPlainTextEdit>
 #include <QGroupBox>
@@ -17,6 +18,7 @@
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
 #include "qxrecentdialog.h"
+#include "qxfilebreadcrumb.h"
 
 static const char* fileFilter =
     "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
@@ -32,7 +34,7 @@ int main(int argc, char* argv[])
 
     auto* mainLayout = new QVBoxLayout(central);
     auto* demoTabs = new MruTabWidget(central);
-    demoTabs->setMinimalTabCount(2);
+    demoTabs->setMinimalTabCount(3);
     mainLayout->addWidget(demoTabs);
 
     auto* mruPage = new QWidget;
@@ -42,6 +44,10 @@ int main(int argc, char* argv[])
     auto* fileDialogPage = new QWidget;
     auto* fileDialogPageLayout = new QVBoxLayout(fileDialogPage);
     demoTabs->addTab(fileDialogPage, "QxFileDialog");
+
+    auto* breadcrumbPage = new QWidget;
+    auto* breadcrumbPageLayout = new QVBoxLayout(breadcrumbPage);
+    demoTabs->addTab(breadcrumbPage, "QxFileBreadcrumb");
 
     // --- MruTabWidget demo ---
     auto* tabGroup = new QGroupBox("Ctrl+Tab = MRU navigation");
@@ -114,6 +120,30 @@ int main(int argc, char* argv[])
     }
     tabGroupLayout->addLayout(tabSetsRow, 1);
     mruPageLayout->addWidget(tabGroup);
+
+    // --- Filesystem breadcrumb demo ---
+    auto* breadcrumbGroup = new QGroupBox("Filesystem breadcrumb");
+    auto* breadcrumbGroupLayout = new QVBoxLayout(breadcrumbGroup);
+    breadcrumbGroupLayout->addWidget(new QLabel(
+        "Click a path segment to go there; click > to choose a subdirectory."));
+    auto* breadcrumb = new QxFileBreadcrumb;
+    breadcrumbGroupLayout->addWidget(breadcrumb);
+    auto* directoryList = new QListWidget;
+    breadcrumbGroupLayout->addWidget(directoryList, 1);
+    breadcrumbPageLayout->addWidget(breadcrumbGroup);
+
+    auto refreshDirectory = [breadcrumb, directoryList]() {
+        directoryList->clear();
+        const QDir dir(breadcrumb->path());
+        const QFileInfoList entries = dir.entryInfoList(
+            QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden,
+            QDir::DirsFirst | QDir::Name);
+        for (const QFileInfo& entry : entries)
+            directoryList->addItem(entry.fileName() + (entry.isDir() ? "/" : ""));
+    };
+    QObject::connect(breadcrumb, &QxFileBreadcrumb::pathActivated,
+                     [refreshDirectory](const QString&) { refreshDirectory(); });
+    refreshDirectory();
 
     // --- Log ---
     auto* logEdit = new QPlainTextEdit;

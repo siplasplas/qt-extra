@@ -18,6 +18,14 @@ Lightweight file open/save and directory selection dialog with a built-in
 recently-used paths list. The caller owns and persists the list — pass it in,
 get the updated list back. Keep separate lists for files and directories.
 
+### QxBreadcrumb
+General breadcrumb driven by caller-supplied segments. It emits signals when a
+segment is clicked or its menu needs actions.
+
+### QxFileBreadcrumb
+Filesystem breadcrumb built on `QxBreadcrumb`. Click a path segment to navigate
+to it, or click the arrow beside it to choose one of its subdirectories.
+
 ### Ev (common utility)
 Qt5/Qt6 compatible helpers for extracting local and global positions from mouse,
 hover, and wheel events.
@@ -47,6 +55,8 @@ Headers are exposed automatically — no extra `include_directories()` needed:
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
 #include "qxrecentdialog.h"
+#include "qxbreadcrumb.h"
+#include "qxfilebreadcrumb.h"
 ```
 
 The demo application is **not** built when qt-extra is included as a submodule.
