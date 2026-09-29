@@ -12,9 +12,8 @@
 #include <QFileDialog>
 
 #include "mrutabwidget.h"
-#include "qxdirdialog.h"
 #include "qxfiledialog.h"
-#include "qxrecentfiledialog.h"
+#include "qxrecentdialog.h"
 
 static const char* fileFilter =
     "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
@@ -73,7 +72,7 @@ int main(int argc, char* argv[])
 
     // --- File dialog demo ---
     const QString home = QDir::homePath();
-    QStringList fileHistory, dirHistory, fileRecent;
+    QStringList fileHistory, dirHistory, fileRecent, dirRecent;
     auto addToHistory = [](QStringList& list, const QString& path) {
         if (path.isEmpty()) return;
         list.removeAll(path);
@@ -143,11 +142,11 @@ int main(int argc, char* argv[])
 
     QObject::connect(fileRecentBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
         if (openRadio->isChecked()) {
-            QString f = QxRecentFileDialog::getOpenFileName(
+            QString f = QxRecentDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, &fileRecent);
             log("open dialog", f);
         } else {
-            QString f = QxRecentFileDialog::getSaveFileName(
+            QString f = QxRecentDialog::getSaveFileName(
                 &mainWindow, "Save File", home, fileFilter, &fileRecent);
             log("save dialog", f);
         }
@@ -161,11 +160,11 @@ int main(int argc, char* argv[])
     auto* dirNativeBtn = new QPushButton("native");
     auto* dirQtBtn     = new QPushButton("qt");
     auto* dirCustomBtn = new QPushButton("custom");
-    auto* dirCustomDirBtn = new QPushButton("custom dir");
+    auto* dirRecentBtn = new QPushButton("recent directories");
     dirBtnRow->addWidget(dirNativeBtn);
     dirBtnRow->addWidget(dirQtBtn);
     dirBtnRow->addWidget(dirCustomBtn);
-    dirBtnRow->addWidget(dirCustomDirBtn);
+    dirBtnRow->addWidget(dirRecentBtn);
     dirBtnRow->addStretch();
     dirLayout->addLayout(dirBtnRow);
 
@@ -190,11 +189,10 @@ int main(int argc, char* argv[])
         log("dir custom", d);
     });
 
-    QObject::connect(dirCustomDirBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString d = QxDirDialog::getExistingDirectory(
-            &mainWindow, "Select Directory", home);
-        addToHistory(dirHistory, d);
-        log("dir custom", d);
+    QObject::connect(dirRecentBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        QString d = QxRecentDialog::getExistingDirectory(
+            &mainWindow, "Select Directory", home, &dirRecent);
+        log("dir recent", d);
     });
 
     auto* dialogRowLayout = new QHBoxLayout;

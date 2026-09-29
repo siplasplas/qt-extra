@@ -18,8 +18,8 @@ find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets)
 add_library(qt-extra STATIC
     common/Ev.cpp
     widgets/mrutabwidget.cpp
-    widgets/qxrecentfiledialog.cpp
-    widgets/qxdirdialog.cpp
+    widgets/qxrecentdialog.cpp
+    widgets/qxrecentdialog.h
     widgets/qxfiledialog.cpp
 )
 
@@ -40,8 +40,7 @@ install(TARGETS qt-extra
 install(FILES
     common/Ev.h
     widgets/mrutabwidget.h
-    widgets/qxrecentfiledialog.h
-    widgets/qxdirdialog.h
+    widgets/qxrecentdialog.h
     widgets/qxfiledialog.h
     DESTINATION include/qt-extra
 )

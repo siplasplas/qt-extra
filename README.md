@@ -13,14 +13,10 @@ Full file-system browser dialog (open/save/directory) with a tree view,
 places sidebar, navigation history, an editable path bar, and name filters.
 A drop-in alternative to `QFileDialog` with a custom, controllable UI.
 
-### QxRecentFileDialog
-Lightweight file open/save dialog that displays a built-in recently-used
-files list. The caller owns and persists the list — pass it in, get the
-updated list back.
-
-### QxDirDialog
-Directory selection dialog with a built-in recently-used directories list.
-Same ownership model as `QxRecentFileDialog`.
+### QxRecentDialog
+Lightweight file open/save and directory selection dialog with a built-in
+recently-used paths list. The caller owns and persists the list — pass it in,
+get the updated list back. Keep separate lists for files and directories.
 
 ### Ev (common utility)
 Qt5/Qt6 compatible helpers for extracting local and global positions from mouse,
@@ -50,8 +46,7 @@ Headers are exposed automatically — no extra `include_directories()` needed:
 ```cpp
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
-#include "qxrecentfiledialog.h"
-#include "qxdirdialog.h"
+#include "qxrecentdialog.h"
 ```
 
 The demo application is **not** built when qt-extra is included as a submodule.
