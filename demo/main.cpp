@@ -28,9 +28,20 @@ int main(int argc, char* argv[])
     mainWindow.setCentralWidget(central);
 
     auto* mainLayout = new QVBoxLayout(central);
+    auto* demoTabs = new MruTabWidget(central);
+    demoTabs->setMinimalTabCount(2);
+    mainLayout->addWidget(demoTabs);
+
+    auto* mruPage = new QWidget;
+    auto* mruPageLayout = new QVBoxLayout(mruPage);
+    demoTabs->addTab(mruPage, "MruTabWidget");
+
+    auto* fileDialogPage = new QWidget;
+    auto* fileDialogPageLayout = new QVBoxLayout(fileDialogPage);
+    demoTabs->addTab(fileDialogPage, "QxFileDialog");
 
     // --- MruTabWidget demo ---
-    auto* tabGroup = new QGroupBox("MruTabWidget  (Ctrl+Tab = MRU navigation)");
+    auto* tabGroup = new QGroupBox("Ctrl+Tab = MRU navigation");
     auto* tabGroupLayout = new QVBoxLayout(tabGroup);
 
     auto* tabWidget = new MruTabWidget;
@@ -56,7 +67,7 @@ int main(int argc, char* argv[])
         tabWidget->setTabPopupText(idx, info.second);
     }
     tabGroupLayout->addWidget(tabWidget);
-    mainLayout->addWidget(tabGroup, 2);
+    mruPageLayout->addWidget(tabGroup);
 
     // --- Log ---
     auto* logEdit = new QPlainTextEdit;
@@ -202,12 +213,12 @@ int main(int argc, char* argv[])
     auto* dialogGroup = new QGroupBox("Dialogs");
     auto* dialogLayout = new QVBoxLayout(dialogGroup);
     dialogLayout->addLayout(dialogRowLayout);
-    mainLayout->addWidget(dialogGroup);
+    fileDialogPageLayout->addWidget(dialogGroup);
 
     auto* logGroup = new QGroupBox("Log");
     auto* logLayout = new QVBoxLayout(logGroup);
     logLayout->addWidget(logEdit);
-    mainLayout->addWidget(logGroup);
+    fileDialogPageLayout->addWidget(logGroup);
 
     mainWindow.resize(860, 680);
     mainWindow.setWindowTitle("qt-extra demo");
