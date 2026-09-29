@@ -1,8 +1,8 @@
 #include "qxrecentdialog.h"
+#include "qxfiledialog.h"
 
 #include <QDialogButtonBox>
 #include <QDir>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -78,11 +78,11 @@ void QxRecentDialog::onBrowse()
 {
     QString selected;
     if (m_mode == Open)
-        selected = QFileDialog::getOpenFileName(this, windowTitle(), m_directory, m_nameFilter);
+        selected = QxFileDialog::getOpenFileName(this, windowTitle(), m_directory, m_nameFilter);
     else if (m_mode == Save)
-        selected = QFileDialog::getSaveFileName(this, windowTitle(), m_directory, m_nameFilter);
+        selected = QxFileDialog::getSaveFileName(this, windowTitle(), m_directory, m_nameFilter);
     else
-        selected = QFileDialog::getExistingDirectory(
+        selected = QxFileDialog::getExistingDirectory(
             this, windowTitle(), m_directory.isEmpty() ? QDir::homePath() : m_directory);
 
     if (!selected.isEmpty()) {
