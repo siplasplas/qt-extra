@@ -373,7 +373,6 @@ void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
 
 void QxFileDialog::onViewContextMenu(const QPoint& pos)
 {
-    // TODO: New > Folder is a placeholder for now
     QMenu menu(this);
     const QModelIndex index = m_view->indexAt(pos);
     if (index.isValid()) {
@@ -385,8 +384,28 @@ void QxFileDialog::onViewContextMenu(const QPoint& pos)
         menu.addSeparator();
     }
     QMenu* newMenu = menu.addMenu("New");
-    newMenu->addAction("Folder");
+    newMenu->addAction("Folder", this, &QxFileDialog::createFolder);
     menu.exec(m_view->viewport()->mapToGlobal(pos));
+}
+
+void QxFileDialog::createFolder()
+{
+    const QDir dir(m_currentPath);
+    const QString base = "new_folder";
+    QString name = base;
+    for (int n = 1; QFileInfo::exists(dir.filePath(name)); ++n)
+        name = QString("%1(%2)").arg(base).arg(n);
+
+    const QModelIndex index = m_model->mkdir(m_model->index(m_currentPath), name);
+    if (!index.isValid()) {
+        QMessageBox::warning(this, "New Folder",
+            QString("Cannot create folder \"%1\" in \"%2\".").arg(name, m_currentPath));
+        return;
+    }
+    // Let the user choose the real name right away
+    m_view->setCurrentIndex(index);
+    m_view->scrollTo(index);
+    m_view->edit(index);
 }
 
 void QxFileDialog::onFileEditReturnPressed()

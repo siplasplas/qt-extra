@@ -59,6 +59,7 @@ private slots:
 
 private:
     void navigateTo(const QString& path, bool pushToHistory = true);
+    void createFolder();
     void goBack();
     void goForward();
     void goUp();
