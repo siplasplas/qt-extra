@@ -20,6 +20,8 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QMenu>
+#include <QMessageBox>
+#include <QStyledItemDelegate>
 #include <QDateTime>
 
 class DateFileSystemModel : public QFileSystemModel {
@@ -55,6 +57,24 @@ private:
     }
 };
 
+// Commits in-place renames and reports when the file system refuses them
+class RenameDelegate : public QStyledItemDelegate {
+public:
+    using QStyledItemDelegate::QStyledItemDelegate;
+
+    void setModelData(QWidget* editor, QAbstractItemModel* model,
+                      const QModelIndex& index) const override {
+        const QString oldName = index.data(Qt::EditRole).toString();
+        const QString newName = qobject_cast<QLineEdit*>(editor)->text().trimmed();
+        if (newName.isEmpty() || newName == oldName)
+            return;
+        if (!model->setData(index, newName, Qt::EditRole))
+            QMessageBox::warning(editor->window(), "Rename",
+                QString("Cannot rename \"%1\" to \"%2\".\n"
+                        "The name may be invalid or already in use.").arg(oldName, newName));
+    }
+};
+
 QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     : QDialog(parent), m_mode(mode)
 {
@@ -64,6 +84,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     // Model — watch full filesystem; view root index will select the directory
     m_model = new DateFileSystemModel(this);
     m_model->setRootPath(QDir::rootPath());
+    m_model->setReadOnly(false);  // allow in-place rename
     m_model->setFilter(mode == Directory
         ? QDir::Dirs  | QDir::NoDotAndDotDot
         : QDir::AllEntries | QDir::AllDirs | QDir::NoDotAndDotDot);
@@ -117,6 +138,8 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_view->setEditTriggers(QAbstractItemView::EditKeyPressed);  // F2; double-click still activates
+    m_view->setItemDelegate(new RenameDelegate(m_view));
 
     // Navigation bar
     m_backBtn    = new QToolButton; m_backBtn->setText("←");
@@ -350,10 +373,15 @@ void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
 
 void QxFileDialog::onViewContextMenu(const QPoint& pos)
 {
-    // TODO: actions are placeholders for now
+    // TODO: New > Folder is a placeholder for now
     QMenu menu(this);
-    if (m_view->indexAt(pos).isValid()) {
-        menu.addAction("Rename");
+    const QModelIndex index = m_view->indexAt(pos);
+    if (index.isValid()) {
+        const QModelIndex nameIndex = index.siblingAtColumn(0);
+        menu.addAction("Rename", this, [this, nameIndex] {
+            m_view->setCurrentIndex(nameIndex);
+            m_view->edit(nameIndex);
+        });
         menu.addSeparator();
     }
     QMenu* newMenu = menu.addMenu("New");
