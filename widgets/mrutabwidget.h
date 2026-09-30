@@ -4,6 +4,7 @@
 #include <QTabWidget>
 #include <QTabBar>
 #include <QList>
+#include <QHash>
 #include <QTimer>
 #include <QPointer>
 #include <QMap>
@@ -20,29 +21,44 @@ class QAbstractButton;
  * @class MruTabWidget
  * @brief Extended QTabWidget with MRU navigation, tab pinning and smart tab management
  *
-* Provides enhanced tab management features for modern IDE-style applications:
+ * Provides enhanced tab management features for modern IDE-style applications:
  * - MRU (Most Recently Used) navigation using Ctrl+Tab/Ctrl+Shift+Tab sequences
  * - Automatic tab management with configurable unpinned tab limit and auto-saving
  * - Context-sensitive close button visibility (visible only for selected/hovered tabs)
  * - Persistent pinned tabs with independent lifetime management
+ * - An optional IDE-style preview tab, tab keys and busy/attention markers
  * - don't use QTabWidget::tabCloseRequested, use instead MruTabWidget signals
- * @see Documentation : docs/widgets/MruTabWidget.md
+ *
+ * Per-tab state (pinned, preview, busy, attention, key, MRU position) belongs to the
+ * page widget, so it follows a tab when the tab is moved.
  */
 class MruTabWidget : public QTabWidget
 {
     Q_OBJECT
 signals:
-    void tabContextMenuRequested(int tabIndex, QMenu* menu);
-    void tabAboutToClose(int index, bool askPin, bool &allow_close);
-    void actionsBeforeTabClose(int index);
+    /**
+     * @brief Emitted before a tab is closed; set @p allow to false to keep the tab.
+     *
+     * @p askPin is true when the close comes from enforceTabLimit(); a vetoed tab is then
+     * pinned. Receivers must use a direct connection (the default for receivers in the
+     * same thread), because @p allow is read right after emission. With several receivers
+     * @p allow may already be false when a receiver runs.
+     */
+    void tabAboutToClose(QWidget *page, bool askPin, bool &allow);
+    /// @brief Emitted after closing was allowed, before the page is removed. Do not delete @p page here.
+    void tabClosing(QWidget *page);
+    /// @brief Emitted after the page was removed from the widget and before it is deleted.
+    void tabClosed(QWidget *page);
+    void tabContextMenuRequested(QWidget *page, QMenu *menu);
     void tabCountChanged(int count);
+    /// @brief Emitted when the preview tab becomes a regular tab.
+    void previewTabPromoted(QWidget *page);
 public:
     /**
      * @brief Constructs an MRU-enabled tab widget
      * @param parent Parent widget
      */
     explicit MruTabWidget(QWidget *parent = nullptr);
-    bool requestCloseTab(int index, bool askPin = false);
 
     /**
      * @brief Destructor cleans up resources
@@ -50,9 +66,23 @@ public:
     ~MruTabWidget() override;
 
     /**
-     * @brief Sets maximum number of allowed tabs
+     * @brief Closes a tab after asking tabAboutToClose.
+     * @return true when the tab was closed
+     *
+     * Emits tabAboutToClose, tabClosing, removes the page, emits tabClosed and deletes the
+     * page with deleteLater() unless deletePagesOnClose() is false.
+     */
+    bool requestCloseTab(QWidget *page, bool askPin = false);
+    bool requestCloseTab(int index, bool askPin = false);
+
+    /// @brief When false, closed pages are only removed and the client owns them after tabClosed.
+    void setDeletePagesOnClose(bool deletePages) { m_deletePagesOnClose = deletePages; }
+    bool deletePagesOnClose() const { return m_deletePagesOnClose; }
+
+    /**
+     * @brief Sets maximum number of allowed unpinned tabs
      * @param limit Maximum tab count (0 = unlimited)
-     * @note limit is clamped to at least minimalTabCount
+     * @note limit is clamped to at least minimalTabCount; the preview tab is not counted
      */
     void setTabLimit(int limit);
 
@@ -77,21 +107,27 @@ public:
     /**
      * @brief Enforces currently set tab limit
      *
-     * Closes least recently used tabs until under limit
+     * Closes least recently used unpinned tabs (never the preview tab) until under limit
+     * @return number of closed tabs
      */
     int enforceTabLimit();
 
     /**
      * @brief Sets pin state for a tab
-     * @param tabIndex Index of tab to modify
+     * @param page Page of the tab to modify
      * @param pinned Whether to pin the tab
+     *
+     * Pinning the preview tab promotes it.
      */
+    void setTabPinned(QWidget *page, bool pinned);
     void setTabPinned(int tabIndex, bool pinned);
+    bool isTabPinned(QWidget *page) const;
     bool isTabPinned(int tabIndex) const;
     bool requestCloseAllTabs();
     void closeOtherTabs(int keepIndex);
     void closeTabsToLeft(int fromIndex);
     void closeTabsToRight(int fromIndex);
+    /// @brief Overrides the built-in pin icon; an empty string restores it.
     void setPinIconUri(QString iconUri) { m_pinIconUri = iconUri; }
 
     void swapTabs(int a, int b);
@@ -113,6 +149,37 @@ public:
      * @brief Returns the popup text for a tab, or tabText() when none is set.
      */
     QString tabPopupText(int index) const;
+
+    /**
+     * @brief Marks a tab as the preview tab (drawn in italics).
+     *
+     * There is at most one preview tab; setting a new one clears the old flag. The
+     * preview tab does not count toward setTabLimit() and is never closed by
+     * enforceTabLimit(). Double-clicking it in the tab bar promotes it.
+     */
+    void setTabPreview(QWidget *page, bool preview);
+    /// @brief Returns the preview tab's page, or nullptr when there is none.
+    QWidget *previewTab() const { return m_previewPage; }
+    /// @brief Clears the preview flag and emits previewTabPromoted.
+    void promotePreviewTab();
+
+    /// @brief Sets a client-defined key identifying what the tab shows.
+    void setTabKey(QWidget *page, const QString &key);
+    QString tabKey(QWidget *page) const;
+    /// @brief Returns the page whose key is @p key, or nullptr.
+    QWidget *findTab(const QString &key) const;
+
+    /**
+     * @brief Shows a busy spinner on the tab.
+     *
+     * Busy and attention markers use the tab button on the side opposite the close
+     * button; they are not shown when the client put its own widget there.
+     */
+    void setTabBusy(QWidget *page, bool busy);
+    bool isTabBusy(QWidget *page) const;
+    /// @brief Marks a background tab; cleared when the tab becomes current. No-op for the current tab.
+    void setTabAttention(QWidget *page, bool attention);
+    bool tabAttention(QWidget *page) const;
 
     /// @brief Sets tab switching mode (false = MRU popup, true = sequential)
     void setSequentialTabSwitching(bool sequential) { m_sequentialTabSwitching = sequential; }
@@ -143,7 +210,14 @@ private slots:
     void onPopupListItemActivated(QListWidgetItem *item);
 
 private:
-    void updateMruOrder(int index);
+    struct TabState {
+        bool pinned = false;
+        bool busy = false;
+        bool attention = false;
+        QString key;
+    };
+
+    void updateMruOrder(QWidget *page);
     void showMruPopup();
     void hideMruPopup();
     void cycleMruPopup(bool forward);
@@ -151,21 +225,31 @@ private:
     void performDirectSwitch();
 
     void onTabContextMenuRequested(const QPoint& pos);
-    void updateTabButton(int index);
+    void updateTabButton(QWidget *page);
+    void updateTabMarker(QWidget *page);
+    QTabBar::ButtonPosition closeButtonSide() const;
+    QIcon pinIcon() const;
+    void ensurePreviewStyle();
     bool handleCtrlTabEvent(QKeyEvent *keyEvent);
+    void closePages(const QList<QWidget*> &pages);
+    void forgetRemovedPages();
 
     void installTabBarEventFilter();
     void removeTabBarEventFilter();
     void updateCloseButtonVisibility();
     void mapCloseButtonsToTabs();
 
-    // Add new private methods
     QVector<QWidget*> findLeastRecentlyUsedUnpinnedTabs(int atMost) const;
-    int pinnedTabCount() const;
+    int limitedTabCount() const;
 
 
     // --- Member Variables ---
-    QList<int> m_mruOrder;
+    // Pages, most recently used first. Pages are dropped in tabRemoved().
+    QList<QWidget*> m_mruOrder;
+    QHash<QWidget*, TabState> m_tabStates;
+    QWidget *m_previewPage = nullptr;
+    bool m_previewStyleInstalled = false;
+    bool m_deletePagesOnClose = true;
     bool m_ctrlHeld = false;
     QTimer m_ctrlTabTimer;
     bool m_expectingPopup = false;
@@ -178,11 +262,10 @@ private:
     // --- New members for close button visibility ---
     int m_hoveredTabIndex = -1; // Index of the tab currently hovered over (-1 if none)
     bool m_isTabBarFilterInstalled = false;
-    // Map to store which button corresponds to which tab index
-    // We use QPointer to handle buttons being deleted automatically
+    // Map to store which button corresponds to which tab index; rebuilt after every
+    // insert, remove, move and resize. QPointer handles buttons being deleted.
     QMap<int, QPointer<QAbstractButton>> m_tabIndexToCloseButtonMap;
 
-    QVector<bool> m_pinnedTabs;
     int m_tabLimit = 0;
     int m_minimalTabCount = 0;
     bool m_sequentialTabSwitching = false;

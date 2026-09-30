@@ -13,6 +13,11 @@
 #include <QGroupBox>
 #include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QTimer>
+#include <QSpinBox>
+#include <QMessageBox>
+#include <memory>
 
 #include "mrutabwidget.h"
 #include "qxfiledialog.h"
@@ -60,22 +65,55 @@ int main(int argc, char* argv[])
         tabs->setMovable(true);
     }
 
-    auto addDemoTab = [](MruTabWidget* tabs, const QString& title, const QString& path) {
+    auto demoText = [](const QString& title, const QString& path) {
+        return QString("// %1\n\nPress Ctrl+Tab to navigate with MRU popup.\n"
+                       "The popup shows the full path \"%2\" instead of the tab title.\n"
+                       "Drag tabs to move them. Right-click a tab to pin or close it.")
+            .arg(title, path);
+    };
+    auto addDemoTab = [demoText](MruTabWidget* tabs, const QString& title, const QString& path) {
         auto* editor = new QTextEdit;
-        editor->setPlainText(
-            QString("// %1\n\nPress Ctrl+Tab to navigate with MRU popup.\n"
-                    "The popup shows the full path \"%2\" instead of the tab title.\n"
-                    "Drag tabs to move them. Right-click a tab to pin or close it.")
-                .arg(title, path));
+        editor->setPlainText(demoText(title, path));
         const int index = tabs->addTab(editor, title);
         tabs->setTabPopupText(index, path);
+        tabs->setTabKey(editor, path);
+        return editor;
     };
     addDemoTab(firstTabs, "main.cpp", "demo/main.cpp");
-    addDemoTab(firstTabs, "mrutabwidget.h", "widgets/mrutabwidget.h");
+    QWidget* attentionTab = addDemoTab(firstTabs, "mrutabwidget.h", "widgets/mrutabwidget.h");
     addDemoTab(firstTabs, "CMakeLists.txt", "CMakeLists.txt");
-    addDemoTab(secondTabs, "README.md", "README.md");
-    addDemoTab(secondTabs, "qxfiledialog.cpp", "widgets/qxfiledialog.cpp");
+    QWidget* pinnedTab = addDemoTab(secondTabs, "README.md", "README.md");
+    QWidget* busyTab = addDemoTab(secondTabs, "qxfiledialog.cpp", "widgets/qxfiledialog.cpp");
     addDemoTab(secondTabs, "qxrecentdialog.cpp", "widgets/qxrecentdialog.cpp");
+    secondTabs->setTabPinned(pinnedTab, true);
+    secondTabs->setTabBusy(busyTab, true);
+    firstTabs->setTabAttention(attentionTab, true);
+
+    // Opens a file in Set A: an open file is activated, otherwise it replaces the preview tab
+    const QStringList previewFiles = {"widgets/qxbreadcrumb.h", "widgets/qxfilebreadcrumb.h",
+                                      "common/Ev.h", "LICENSE"};
+    auto previewFile = [=](const QString& path) {
+        if (QWidget* open = firstTabs->findTab(path)) {
+            firstTabs->setCurrentWidget(open);
+            return;
+        }
+        const QString title = QFileInfo(path).fileName();
+        auto* editor = qobject_cast<QTextEdit*>(firstTabs->previewTab());
+        if (!editor) {
+            editor = new QTextEdit;
+            firstTabs->addTab(editor, title);
+            firstTabs->setTabPreview(editor, true);
+        }
+        const int index = firstTabs->indexOf(editor);
+        editor->setPlainText(demoText(title, path)
+                             + "\n\nThis is the preview tab: double-click it to keep it open.");
+        firstTabs->setTabText(index, title);
+        firstTabs->setTabPopupText(index, path);
+        firstTabs->setTabKey(editor, path);
+        firstTabs->setCurrentWidget(editor);
+    };
+    previewFile(previewFiles.first());
+    firstTabs->setCurrentIndex(0);
 
     auto* optionsRow = new QHBoxLayout;
     optionsRow->addWidget(new QLabel("Tab position:"));
@@ -91,6 +129,63 @@ int main(int argc, char* argv[])
     optionsRow->addWidget(swapButton);
     optionsRow->addStretch();
     tabGroupLayout->addLayout(optionsRow);
+
+    auto* stateRow = new QHBoxLayout;
+    stateRow->addWidget(new QLabel("Set A:"));
+    auto* previewCombo = new QComboBox;
+    previewCombo->addItems(previewFiles);
+    stateRow->addWidget(previewCombo);
+    auto* previewButton = new QPushButton("Preview");
+    stateRow->addWidget(previewButton);
+    auto* busyButton = new QPushButton("Toggle busy");
+    stateRow->addWidget(busyButton);
+    auto* attentionButton = new QPushButton("Attention on others in 2 s");
+    stateRow->addWidget(attentionButton);
+    stateRow->addStretch();
+    tabGroupLayout->addLayout(stateRow);
+
+    auto* limitRow = new QHBoxLayout;
+    limitRow->addWidget(new QLabel("Tab limit:"));
+    auto* limitSpin = new QSpinBox;
+    limitSpin->setRange(0, 20);
+    limitSpin->setSpecialValueText("unlimited");
+    limitSpin->setToolTip("Unpinned tabs per set; the least recently used ones are closed");
+    limitRow->addWidget(limitSpin);
+    auto* askPinCheck = new QCheckBox("Ask before auto-close (No pins the tab)");
+    askPinCheck->setChecked(true);
+    limitRow->addWidget(askPinCheck);
+    auto* newTabAButton = new QPushButton("New tab in A");
+    limitRow->addWidget(newTabAButton);
+    auto* newTabBButton = new QPushButton("New tab in B");
+    limitRow->addWidget(newTabBButton);
+    limitRow->addStretch();
+    tabGroupLayout->addLayout(limitRow);
+
+    auto newTabCounter = std::make_shared<int>(0);
+    auto addNewTab = [=](MruTabWidget* tabs) {
+        const QString title = QString("new%1.txt").arg(++*newTabCounter);
+        tabs->setCurrentWidget(addDemoTab(tabs, title, "new/" + title));
+    };
+    QObject::connect(newTabAButton, &QPushButton::clicked, [=]() { addNewTab(firstTabs); });
+    QObject::connect(newTabBButton, &QPushButton::clicked, [=]() { addNewTab(secondTabs); });
+    QObject::connect(limitSpin, QOverload<int>::of(&QSpinBox::valueChanged), [=](int limit) {
+        firstTabs->setTabLimit(limit);
+        secondTabs->setTabLimit(limit);
+    });
+
+    QObject::connect(previewButton, &QPushButton::clicked, [=]() {
+        previewFile(previewCombo->currentText());
+    });
+    QObject::connect(busyButton, &QPushButton::clicked, [=]() {
+        if (QWidget* page = firstTabs->currentWidget())
+            firstTabs->setTabBusy(page, !firstTabs->isTabBusy(page));
+    });
+    QObject::connect(attentionButton, &QPushButton::clicked, [=]() {
+        QTimer::singleShot(2000, firstTabs, [=]() {
+            for (int i = 0; i < firstTabs->count(); ++i)
+                firstTabs->setTabAttention(firstTabs->widget(i), true);
+        });
+    });
 
     QObject::connect(positionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
                      [=](int index) {
@@ -118,6 +213,41 @@ int main(int argc, char* argv[])
         tabSetsRow->addWidget(setGroup, 1);
     }
     tabGroupLayout->addLayout(tabSetsRow, 1);
+
+    auto* tabLog = new QPlainTextEdit;
+    tabLog->setReadOnly(true);
+    tabLog->setMaximumHeight(80);
+    tabLog->setPlaceholderText("tab signals...");
+    tabGroupLayout->addWidget(tabLog);
+    for (auto* tabs : {firstTabs, secondTabs}) {
+        QObject::connect(tabs, &MruTabWidget::tabClosing, [=](QWidget* page) {
+            tabLog->appendPlainText("closing " + tabs->tabText(tabs->indexOf(page)));
+        });
+        QObject::connect(tabs, &MruTabWidget::previewTabPromoted, [=](QWidget* page) {
+            tabLog->appendPlainText("promoted " + tabs->tabText(tabs->indexOf(page)));
+        });
+        // Direct connection: allow is read right after the signal returns
+        QObject::connect(tabs, &MruTabWidget::tabAboutToClose,
+                         [=, &mainWindow](QWidget* page, bool askPin, bool& allow) {
+            if (!askPin || !askPinCheck->isChecked())
+                return;
+            const QString title = tabs->tabText(tabs->indexOf(page));
+            const auto answer = QMessageBox::question(
+                &mainWindow, "Tab limit reached",
+                QString("Close \"%1\"?\nNo keeps it open and pins it.").arg(title));
+            if (answer != QMessageBox::Yes) {
+                allow = false;
+                tabLog->appendPlainText("kept and pinned " + title);
+            }
+        });
+        QObject::connect(tabs, &MruTabWidget::tabContextMenuRequested, [=](QWidget*, QMenu* menu) {
+            QAction* first = menu->actions().value(0);
+            QAction* newTab = new QAction("New Tab", menu);
+            QObject::connect(newTab, &QAction::triggered, [=]() { addNewTab(tabs); });
+            menu->insertAction(first, newTab);
+            menu->insertSeparator(first);
+        });
+    }
     mruPageLayout->addWidget(tabGroup);
 
     // --- Filesystem breadcrumb demo ---

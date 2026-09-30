@@ -16,10 +16,141 @@
 #include <QToolButton>
 #include <QDebug>
 #include <QMenu>
+#include <QPainter>
+#include <QProxyStyle>
+#include <QStyleFactory>
+#include <QStyleOptionTab>
+#include <algorithm>
 
 #include "Ev.h"
 
 constexpr int CTRL_TAB_TIMEOUT_MS = 200;
+
+namespace {
+
+// Draws the preview tab's label in italics. QTabBar has no per-tab font and the style
+// option does not carry the tab index, so the tab is recognized by its rectangle, or by
+// its text while it is being dragged. When neither matches, the label is drawn upright.
+class PreviewTabStyle : public QProxyStyle
+{
+public:
+    PreviewTabStyle(QStyle *base, MruTabWidget *owner) : QProxyStyle(base), m_owner(owner) {}
+
+    void drawControl(ControlElement element, const QStyleOption *option, QPainter *painter,
+                     const QWidget *widget) const override
+    {
+        const auto *tab = qstyleoption_cast<const QStyleOptionTab*>(option);
+        if (element == CE_TabBarTabLabel && tab && isPreviewTab(*tab, widget)) {
+            painter->save();
+            QFont font = painter->font();
+            font.setItalic(true);
+            painter->setFont(font);
+            QProxyStyle::drawControl(element, option, painter, widget);
+            painter->restore();
+            return;
+        }
+        QProxyStyle::drawControl(element, option, painter, widget);
+    }
+
+private:
+    bool isPreviewTab(const QStyleOptionTab &tab, const QWidget *widget) const
+    {
+        if (!m_owner || !m_owner->previewTab() || widget != m_owner->tabBar())
+            return false;
+        const QTabBar *bar = m_owner->tabBar();
+        const int previewIndex = m_owner->indexOf(m_owner->previewTab());
+        if (previewIndex < 0)
+            return false;
+        if (bar->tabRect(previewIndex) == tab.rect)
+            return true;
+        for (int i = 0; i < bar->count(); ++i) {
+            if (bar->tabRect(i) == tab.rect)
+                return false;
+        }
+        return bar->tabText(previewIndex) == tab.text
+               && bar->tabRect(previewIndex).size() == tab.rect.size();
+    }
+
+    QPointer<MruTabWidget> m_owner;
+};
+
+// Busy spinner or attention dot shown as a tab button.
+class TabMarker : public QWidget
+{
+public:
+    explicit TabMarker(QWidget *parent) : QWidget(parent)
+    {
+        setObjectName(QStringLiteral("MruTabMarker"));
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFixedSize(12, 12);
+        m_timer.setInterval(80);
+        QObject::connect(&m_timer, &QTimer::timeout, this, [this]() {
+            m_angle = (m_angle + 30) % 360;
+            update();
+        });
+    }
+
+    void setState(bool busy, bool attention)
+    {
+        m_busy = busy;
+        m_attention = attention;
+        if (busy)
+            m_timer.start();
+        else
+            m_timer.stop();
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        const QColor color = palette().color(m_attention ? QPalette::Highlight : QPalette::WindowText);
+        const QRectF r = QRectF(rect()).adjusted(1.5, 1.5, -1.5, -1.5);
+        if (m_busy) {
+            p.setPen(QPen(color, 1.8, Qt::SolidLine, Qt::RoundCap));
+            p.drawArc(r, -m_angle * 16, 270 * 16);
+        } else if (m_attention) {
+            p.setPen(Qt::NoPen);
+            p.setBrush(color);
+            p.drawEllipse(r.adjusted(1.5, 1.5, -1.5, -1.5));
+        }
+    }
+
+private:
+    QTimer m_timer;
+    int m_angle = 0;
+    bool m_busy = false;
+    bool m_attention = false;
+};
+
+// Built-in pushpin used when setPinIconUri() was not called.
+QIcon paintedPinIcon(const QColor &color)
+{
+    QIcon icon;
+    for (int size : {16, 32, 48}) {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+        QPainter p(&pixmap);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.scale(size / 16.0, size / 16.0);
+        p.translate(8, 8);
+        p.rotate(45);
+        p.setPen(Qt::NoPen);
+        p.setBrush(color);
+        p.drawRoundedRect(QRectF(-3, -7, 6, 2), 0.8, 0.8);  // cap
+        p.drawRect(QRectF(-2, -5.5, 4, 5.5));                // body
+        p.drawRoundedRect(QRectF(-4.5, 0, 9, 1.8), 0.6, 0.6); // collar
+        p.setPen(QPen(color, 1.2, Qt::SolidLine, Qt::RoundCap));
+        p.drawLine(QPointF(0, 1.8), QPointF(0, 7.5));        // needle
+        p.end();
+        icon.addPixmap(pixmap);
+    }
+    return icon;
+}
+
+} // namespace
 
 /**
  * @brief Constructs MruTabWidget with parent
@@ -37,6 +168,14 @@ MruTabWidget::MruTabWidget(QWidget *parent)
     tabBar()->setMouseTracking(true);
     tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(tabBar(), &QTabBar::customContextMenuRequested, this, &MruTabWidget::onTabContextMenuRequested);
+    connect(tabBar(), &QTabBar::tabMoved, this, [this]() {
+        mapCloseButtonsToTabs();
+        updateCloseButtonVisibility();
+    });
+    connect(tabBar(), &QTabBar::tabBarDoubleClicked, this, [this](int index) {
+        if (index >= 0 && widget(index) == m_previewPage)
+            promotePreviewTab();
+    });
 
     connect(this, &QTabWidget::tabCloseRequested, [this](int index) {
         requestCloseTab(index);
@@ -46,23 +185,42 @@ MruTabWidget::MruTabWidget(QWidget *parent)
 
 bool MruTabWidget::requestCloseTab(int index, bool askPin)
 {
-    assert(index >= 0 && index < count());
+    if (index < 0 || index >= count())
+        return false;
+    return requestCloseTab(widget(index), askPin);
+}
+
+bool MruTabWidget::requestCloseTab(QWidget *page, bool askPin)
+{
+    if (!page || indexOf(page) < 0)
+        return false;
 
     // Check if we're at minimal tab count
     if (!canCloseTabs()) {
         return false;
     }
 
-    QWidget* tab = widget(index);
-    assert(tab);
-
+    QPointer<QWidget> guard(page);
     bool allowClose = true;
-    emit tabAboutToClose(index, askPin, allowClose);
-    if (!allowClose) return false;
-    emit actionsBeforeTabClose(index);
-    tab->deleteLater();
-    removeTab(index);
+    emit tabAboutToClose(page, askPin, allowClose);
+    if (!allowClose || !guard) return false;
+    emit tabClosing(page);
+    if (!guard) return true;
+    const int index = indexOf(page);
+    if (index >= 0)
+        removeTab(index);
+    emit tabClosed(page);
+    if (guard && m_deletePagesOnClose)
+        page->deleteLater();
     return true;
+}
+
+void MruTabWidget::closePages(const QList<QWidget*> &pages)
+{
+    for (const QPointer<QWidget> &page : QList<QPointer<QWidget>>(pages.begin(), pages.end())) {
+        if (page)
+            requestCloseTab(page.data());
+    }
 }
 
 
@@ -265,7 +423,12 @@ void MruTabWidget::onCurrentChanged(int index)
 {
     // Update the MRU order when the selected tab changes
     if (index >= 0) {
-        updateMruOrder(index);
+        QWidget *page = widget(index);
+        updateMruOrder(page);
+        if (tabAttention(page)) {
+            m_tabStates[page].attention = false;
+            updateTabMarker(page);
+        }
     }
     // Hide the popup if it's open and Ctrl is not pressed (e.g., changed by clicking)
     if (m_mruPopup && !m_ctrlHeld) {
@@ -304,21 +467,28 @@ void MruTabWidget::onPopupListItemActivated(QListWidgetItem *item)
  * @brief Updates MRU list after tab removal
  * @param index Removed tab index
  */
+void MruTabWidget::forgetRemovedPages()
+{
+    // Only pointers are compared here; a removed page may already be under destruction.
+    auto removed = [this](QWidget *page) { return indexOf(page) < 0; };
+    m_mruOrder.erase(std::remove_if(m_mruOrder.begin(), m_mruOrder.end(), removed),
+                     m_mruOrder.end());
+    for (auto it = m_tabStates.begin(); it != m_tabStates.end();) {
+        if (removed(it.key()))
+            it = m_tabStates.erase(it);
+        else
+            ++it;
+    }
+    if (m_previewPage && removed(m_previewPage)) {
+        m_previewPage = nullptr;
+    }
+}
+
 void MruTabWidget::tabRemoved(int index)
 {
-    // Update the MRU list *before* the tab is actually removed
-    m_mruOrder.removeAll(index); // Remove all occurrences of the index
-    // Adjust indices in the MRU list that were greater than the removed one
-    for (int i = 0; i < m_mruOrder.size(); ++i) {
-        if (m_mruOrder[i] > index) {
-            m_mruOrder[i]--;
-        }
-    }
-
-    // Remove entry from pinned tabs vector
-    if (index < m_pinnedTabs.size()) {
-        m_pinnedTabs.remove(index);
-    }
+    Q_UNUSED(index);
+    // The page is already gone from the stack, so drop every page it no longer holds
+    forgetRemovedPages();
 
     // The base class handles the actual removal and emits signals
     // We update the mapping *after* the tab is visually gone
@@ -333,19 +503,12 @@ void MruTabWidget::tabRemoved(int index)
 }
 
 void MruTabWidget::tabInserted(int index) {
-    // Adjust MRU order for indices after the insertion point
-    for (int i = 0; i < m_mruOrder.size(); ++i) {
-        if (m_mruOrder[i] >= index) {
-            m_mruOrder[i]++;
-        }
-    }
-    m_mruOrder.prepend(index);
-
-    // Insert entry in pinned tabs vector
-    if (index >= m_pinnedTabs.size()) {
-        m_pinnedTabs.resize(count());
-    } else {
-        m_pinnedTabs.insert(index, false);
+    // A new tab is treated as recently used: it goes right after the current tab
+    // (currentChanged has already added it when it became current)
+    QWidget *page = widget(index);
+    if (page && !m_mruOrder.contains(page)) {
+        const bool currentFirst = !m_mruOrder.isEmpty() && m_mruOrder.first() == currentWidget();
+        m_mruOrder.insert(currentFirst ? 1 : 0, page);
     }
 
     // The base class handles insertion and emits signals
@@ -636,10 +799,15 @@ void MruTabWidget::updateCloseButtonVisibility() {
 
 bool MruTabWidget::isTabPinned(int tabIndex) const
 {
-    if (tabIndex < 0 || tabIndex >= m_pinnedTabs.size()) {
+    if (tabIndex < 0 || tabIndex >= count()) {
         return false;
     }
-    return m_pinnedTabs[tabIndex];
+    return isTabPinned(widget(tabIndex));
+}
+
+bool MruTabWidget::isTabPinned(QWidget *page) const
+{
+    return m_tabStates.value(page).pinned;
 }
 
 QVector<QWidget*> MruTabWidget::findLeastRecentlyUsedUnpinnedTabs(int atMost) const
@@ -647,51 +815,43 @@ QVector<QWidget*> MruTabWidget::findLeastRecentlyUsedUnpinnedTabs(int atMost) co
     QVector<QWidget*> result;
     if (atMost <= 0) return result;
 
+    auto candidate = [this, &result](QWidget *w) {
+        return w && indexOf(w) >= 0 && !isTabPinned(w) && w != m_previewPage && !result.contains(w);
+    };
+
     // First, try to find unpinned tabs from MRU list (least recent to most recent)
     for (int i = m_mruOrder.size() - 1; i >= 0 && result.size() < atMost; --i) {
-        int tabIndex = m_mruOrder[i];
-        if (tabIndex >= 0 && tabIndex < count() && !isTabPinned(tabIndex)) {
-            QWidget* w = widget(tabIndex);
-            if (w && !result.contains(w)) {
-                result.append(w);
-            }
-        }
+        if (candidate(m_mruOrder[i]))
+            result.append(m_mruOrder[i]);
     }
 
     // If we still need more, search through all tabs from right to left
-    if (result.size() < atMost) {
-        for (int i = count() - 1; i >= 0 && result.size() < atMost; --i) {
-            if (!isTabPinned(i)) {
-                QWidget* w = widget(i);
-                if (w && !result.contains(w)) {
-                    result.append(w);
-                }
-            }
-        }
+    for (int i = count() - 1; i >= 0 && result.size() < atMost; --i) {
+        if (candidate(widget(i)))
+            result.append(widget(i));
     }
 
     return result;
 }
 
-int MruTabWidget::pinnedTabCount() const
+// Tabs that count toward the tab limit: unpinned tabs except the preview tab
+int MruTabWidget::limitedTabCount() const
 {
-    int count = 0;
-    for (bool pinned : m_pinnedTabs) {
-        if (pinned) count++;
+    int limited = 0;
+    for (int i = 0; i < count(); ++i) {
+        QWidget *page = widget(i);
+        if (!isTabPinned(page) && page != m_previewPage)
+            limited++;
     }
-    return count;
+    return limited;
 }
 
-// Modify updateMruOrder to skip pinned tabs
-void MruTabWidget::updateMruOrder(int index) {
-    if (count() < 2)
+void MruTabWidget::updateMruOrder(QWidget *page) {
+    if (!page)
         return;
-    if (m_mruOrder.count() > count())
-        return;
-    // Remove the index if it already exists
-    m_mruOrder.removeAll(index);
-    // Insert the index at the beginning (most recently used)
-    m_mruOrder.prepend(index);
+    m_mruOrder.removeAll(page);
+    // Insert the page at the beginning (most recently used)
+    m_mruOrder.prepend(page);
 }
 
 void MruTabWidget::showMruPopup()
@@ -702,19 +862,14 @@ void MruTabWidget::showMruPopup()
     }
 
     // Build the list of tabs to show in the popup (MRU + rest)
-    QList<int> tabsToShowOrder;
-    QSet<int> addedIndices;
-    for (int index : m_mruOrder) {
-        if (index >= 0 && index < count() && !addedIndices.contains(index)) {
-            tabsToShowOrder.append(index);
-            addedIndices.insert(index);
-        }
+    QList<QWidget*> tabsToShowOrder;
+    for (QWidget *page : m_mruOrder) {
+        if (indexOf(page) >= 0 && !tabsToShowOrder.contains(page))
+            tabsToShowOrder.append(page);
     }
     for (int i = 0; i < count(); ++i) {
-        if (!addedIndices.contains(i)) {
-            tabsToShowOrder.append(i);
-            addedIndices.insert(i);
-        }
+        if (!tabsToShowOrder.contains(widget(i)))
+            tabsToShowOrder.append(widget(i));
     }
 
     if (tabsToShowOrder.size() < 2) {
@@ -734,13 +889,18 @@ void MruTabWidget::showMruPopup()
     }
 
     // Populate the list widget based on the new order
-    for (int tabIndex : tabsToShowOrder) {
-        if (tabIndex >= 0 && tabIndex < count()) {
-            QListWidgetItem *item = new QListWidgetItem(tabPopupText(tabIndex), m_mruListWidget);
-            item->setData(Qt::UserRole, tabIndex); // Store the tab index
-            item->setIcon(tabIcon(tabIndex));
-            m_mruListWidget->addItem(item);
+    for (QWidget *page : tabsToShowOrder) {
+        const int tabIndex = indexOf(page);
+        QListWidgetItem *item = new QListWidgetItem(tabPopupText(tabIndex), m_mruListWidget);
+        // Store the page, resolved to an index when the item is activated
+        item->setData(Qt::UserRole, QVariant::fromValue(reinterpret_cast<quintptr>(page)));
+        item->setIcon(tabIcon(tabIndex));
+        if (page == m_previewPage) {
+            QFont font = item->font();
+            font.setItalic(true);
+            item->setFont(font);
         }
+        m_mruListWidget->addItem(item);
     }
 
     // Popup layout
@@ -810,9 +970,9 @@ void MruTabWidget::activateSelectedMruTab()
     if (!m_mruPopup || !m_mruListWidget) return;
     QListWidgetItem *selectedItem = m_mruListWidget->currentItem();
     if (selectedItem) {
-        bool ok;
-        int indexToActivate = selectedItem->data(Qt::UserRole).toInt(&ok); // Get index from data
-        if (ok && indexToActivate >= 0 && indexToActivate < count()) {
+        auto *page = reinterpret_cast<QWidget*>(selectedItem->data(Qt::UserRole).value<quintptr>());
+        const int indexToActivate = indexOf(page);
+        if (indexToActivate >= 0) {
             setCurrentIndex(indexToActivate); // Set as current tab
         }
     }
@@ -820,13 +980,16 @@ void MruTabWidget::activateSelectedMruTab()
 
 void MruTabWidget::performDirectSwitch()
 {
-    // Perform the quick switch (without popup)
-    if (m_mruOrder.size() >= 2) {
-        // MRU logic: Switch to the second element (index 1)
-        int indexToActivate = m_mruOrder[1];
-        if (indexToActivate >= 0 && indexToActivate < count()) {
-            setCurrentIndex(indexToActivate);
+    // Perform the quick switch (without popup): the most recent tab other than the current one
+    QWidget *previous = nullptr;
+    for (QWidget *page : m_mruOrder) {
+        if (page != currentWidget() && indexOf(page) >= 0) {
+            previous = page;
+            break;
         }
+    }
+    if (previous) {
+        setCurrentWidget(previous);
     } else {
         // Cyclic logic when MRU < 2
         int current = currentIndex();
@@ -841,44 +1004,52 @@ void MruTabWidget::performDirectSwitch()
 
 bool MruTabWidget::requestCloseAllTabs()
 {
-    int leaved = 0;
+    QList<QPointer<QWidget>> pages;
     for (int index = count() - 1; index >= 0; index--)
-    {
-        if (!requestCloseTab(index))
-            leaved++;
+        pages.append(widget(index));
+    bool allClosed = true;
+    for (const QPointer<QWidget> &page : pages) {
+        if (page && !requestCloseTab(page.data()))
+            allClosed = false;
     }
-    return leaved == 0;
+    return allClosed;
 }
 
 void MruTabWidget::closeOtherTabs(int keepIndex)
 {
+    QList<QWidget*> pages;
     for (int i = count() - 1; i >= 0; --i)
     {
         if (i != keepIndex)
-            requestCloseTab(i);
+            pages.append(widget(i));
     }
+    closePages(pages);
 }
 
 void MruTabWidget::closeTabsToLeft(int fromIndex)
 {
-    for (int i = fromIndex - 1; i >= 0; --i)
-    {
-        requestCloseTab(i);
-    }
+    QList<QWidget*> pages;
+    for (int i = qMin(fromIndex, count()) - 1; i >= 0; --i)
+        pages.append(widget(i));
+    closePages(pages);
 }
 
 void MruTabWidget::closeTabsToRight(int fromIndex)
 {
+    QList<QWidget*> pages;
     for (int i = count() - 1; i > fromIndex; --i)
-    {
-        requestCloseTab(i);
-    }
+        pages.append(widget(i));
+    closePages(pages);
 }
 
 void MruTabWidget::onTabContextMenuRequested(const QPoint& pos)
 {
     int tabIndex = tabBar()->tabAt(pos);
     if (tabIndex < 0) return; // A blank space was clicked
+
+    // Actions resolve the page to its current index when triggered
+    QPointer<QWidget> page = widget(tabIndex);
+    auto pageIndex = [this, page]() { return page ? indexOf(page.data()) : -1; };
 
     QMenu menu(this);
 
@@ -887,14 +1058,16 @@ void MruTabWidget::onTabContextMenuRequested(const QPoint& pos)
     QAction* closeAction = menu.addAction(tr("Close"));
     closeAction->setShortcut(QKeySequence::Close); // Ctrl+F4
     closeAction->setEnabled(canClose);
-    connect(closeAction, &QAction::triggered, this, [this, tabIndex]() {
-        requestCloseTab(tabIndex);
+    connect(closeAction, &QAction::triggered, this, [this, page]() {
+        if (page)
+            requestCloseTab(page.data());
     });
 
     QAction* closeOthersAction = menu.addAction(tr("Close Other Tabs"));
     closeOthersAction->setEnabled(canClose && count() > 1);
-    connect(closeOthersAction, &QAction::triggered, this, [this, tabIndex]() {
-        closeOtherTabs(tabIndex);
+    connect(closeOthersAction, &QAction::triggered, this, [this, pageIndex]() {
+        if (pageIndex() >= 0)
+            closeOtherTabs(pageIndex());
     });
 
     // Only show "Close All Tabs" when minimalTabCount is 0
@@ -909,72 +1082,81 @@ void MruTabWidget::onTabContextMenuRequested(const QPoint& pos)
 
     QAction* closeLeftAction = menu.addAction(tr("Close Tabs to the Left"));
     closeLeftAction->setEnabled(canClose && tabIndex > 0);
-    connect(closeLeftAction, &QAction::triggered, this, [this, tabIndex]() {
-        closeTabsToLeft(tabIndex);
+    connect(closeLeftAction, &QAction::triggered, this, [this, pageIndex]() {
+        if (pageIndex() >= 0)
+            closeTabsToLeft(pageIndex());
     });
 
     QAction* closeRightAction = menu.addAction(tr("Close Tabs to the Right"));
     closeRightAction->setEnabled(canClose && tabIndex < count() - 1);
-    connect(closeRightAction, &QAction::triggered, this, [this, tabIndex]() {
-        closeTabsToRight(tabIndex);
+    connect(closeRightAction, &QAction::triggered, this, [this, pageIndex]() {
+        if (pageIndex() >= 0)
+            closeTabsToRight(pageIndex());
     });
 
     menu.addSeparator();
 
-    if (isTabPinned(tabIndex))
-    {
-        QAction* unpinAction = menu.addAction(tr("Unpin Tab"));
-        connect(unpinAction, &QAction::triggered, this, [this, tabIndex]() {
-            setTabPinned(tabIndex, false);
-            updateTabButton(tabIndex);
-        });
-    }
-    else
-    {
-        QAction* pinAction = menu.addAction(tr("Pin Tab"));
-        connect(pinAction, &QAction::triggered, this, [this, tabIndex]() {
-            setTabPinned(tabIndex, true);
-            updateTabButton(tabIndex);
-        });
-    }
+    const bool pinned = isTabPinned(tabIndex);
+    QAction* pinAction = menu.addAction(pinned ? tr("Unpin Tab") : tr("Pin Tab"));
+    connect(pinAction, &QAction::triggered, this, [this, page, pinned]() {
+        if (page)
+            setTabPinned(page.data(), !pinned);
+    });
 
-    emit tabContextMenuRequested(tabIndex, &menu);
+    emit tabContextMenuRequested(page.data(), &menu);
     menu.exec(tabBar()->mapToGlobal(pos));
 }
 
+QTabBar::ButtonPosition MruTabWidget::closeButtonSide() const
+{
+    return static_cast<QTabBar::ButtonPosition>(
+        tabBar()->style()->styleHint(QStyle::SH_TabBar_CloseButtonPosition, nullptr, tabBar()));
+}
 
-void MruTabWidget::updateTabButton(int index)
+QIcon MruTabWidget::pinIcon() const
+{
+    if (!m_pinIconUri.isEmpty())
+        return QIcon(m_pinIconUri);
+    return paintedPinIcon(palette().color(QPalette::WindowText));
+}
+
+void MruTabWidget::updateTabButton(QWidget *page)
 {
     QTabBar* bar = tabBar();
-    if (!bar || index < 0 || index >= bar->count())
+    const int index = indexOf(page);
+    if (!bar || index < 0)
         return;
 
-    // Usuwamy stary przycisk
-    QWidget* existingButton = bar->tabButton(index, QTabBar::RightSide);
+    const QTabBar::ButtonPosition side = closeButtonSide();
+
+    // Remove the old button
+    QWidget* existingButton = bar->tabButton(index, side);
     if (existingButton) {
         existingButton->deleteLater();
     }
 
-    if (isTabPinned(index))
+    // Buttons keep the page, not the index, so they still work after the tab is moved
+    QPointer<QWidget> target(page);
+    if (isTabPinned(page))
     {
-        // Pinned: wstawiamy pinezkę
+        // Pinned: show the pin, which unpins the tab
         QToolButton* pinButton = new QToolButton(bar);
-        pinButton->setIcon(QIcon(m_pinIconUri));
+        pinButton->setIcon(pinIcon());
         pinButton->setIconSize(QSize(16, 16));
         pinButton->setCursor(Qt::PointingHandCursor);
         pinButton->setToolTip(tr("Unpin Tab"));
         pinButton->setStyleSheet("QToolButton { border: none; padding: 0px; }");
 
-        connect(pinButton, &QToolButton::clicked, this, [this, index]() {
-            setTabPinned(index, false);
-            updateTabButton(index);
+        connect(pinButton, &QToolButton::clicked, this, [this, target]() {
+            if (target)
+                setTabPinned(target.data(), false);
         });
 
-        bar->setTabButton(index, QTabBar::RightSide, pinButton);
+        bar->setTabButton(index, side, pinButton);
     }
-    else
+    else if (tabsClosable())
     {
-        // Nie pinned: wstawiamy przycisk zamykania
+        // Not pinned: show the close button
         QToolButton* closeButton = new QToolButton(bar);
         closeButton->setIcon(style()->standardIcon(QStyle::SP_TitleBarCloseButton));
         closeButton->setIconSize(QSize(16, 16));
@@ -982,36 +1164,70 @@ void MruTabWidget::updateTabButton(int index)
         closeButton->setToolTip(tr("Close Tab"));
         closeButton->setStyleSheet("QToolButton { border: none; padding: 0px; }");
 
-        connect(closeButton, &QToolButton::clicked, this, [this, index]() {
-            emit tabCloseRequested(index);
+        connect(closeButton, &QToolButton::clicked, this, [this, target]() {
+            const int targetIndex = target ? indexOf(target.data()) : -1;
+            if (targetIndex >= 0)
+                emit tabCloseRequested(targetIndex);
         });
 
-        bar->setTabButton(index, QTabBar::RightSide, closeButton);
+        bar->setTabButton(index, side, closeButton);
     }
+    else
+    {
+        bar->setTabButton(index, side, nullptr);
+    }
+}
+
+void MruTabWidget::updateTabMarker(QWidget *page)
+{
+    QTabBar* bar = tabBar();
+    const int index = indexOf(page);
+    if (index < 0)
+        return;
+
+    const QTabBar::ButtonPosition side =
+        closeButtonSide() == QTabBar::LeftSide ? QTabBar::RightSide : QTabBar::LeftSide;
+    QWidget* existing = bar->tabButton(index, side);
+    auto* marker = dynamic_cast<TabMarker*>(existing);
+    if (existing && !marker)
+        return; // The client's own button, leave it alone
+
+    const TabState state = m_tabStates.value(page);
+    if (!state.busy && !state.attention) {
+        if (marker) {
+            bar->setTabButton(index, side, nullptr);
+            marker->deleteLater();
+        }
+        return;
+    }
+    if (!marker) {
+        marker = new TabMarker(bar);
+        bar->setTabButton(index, side, marker);
+    }
+    marker->setState(state.busy, state.attention);
 }
 
 int MruTabWidget::enforceTabLimit()
 {
     if (m_tabLimit <= 0) return 0;
 
-    int unpinnedCount = count() - pinnedTabCount();
-    if (unpinnedCount <= m_tabLimit) return 0;
+    const int limitedCount = limitedTabCount();
+    if (limitedCount <= m_tabLimit) return 0;
 
-    int tabsToRemove = unpinnedCount - m_tabLimit;
-    QVector<QWidget*> tabsToClose = findLeastRecentlyUsedUnpinnedTabs(tabsToRemove);
+    const QVector<QWidget*> found = findLeastRecentlyUsedUnpinnedTabs(limitedCount - m_tabLimit);
+    const QList<QPointer<QWidget>> tabsToClose(found.begin(), found.end());
 
     int removedCount = 0;
-    for (QWidget* w : tabsToClose) {
-        int index = indexOf(w);
-        if (index == -1) continue; // Widget not found, skip
+    for (const QPointer<QWidget> &w : tabsToClose) {
+        if (!w || indexOf(w.data()) == -1) continue; // Widget not found, skip
 
         // Try to close the tab with askPin = true
-        if (requestCloseTab(index, true)) {
+        if (requestCloseTab(w.data(), true)) {
             // Tab was closed successfully
             removedCount++;
-        } else {
+        } else if (w) {
             // User cancelled - pin the tab
-            setTabPinned(index, true);
+            setTabPinned(w.data(), true);
         }
     }
 
@@ -1026,26 +1242,10 @@ void MruTabWidget::swapTabs(int a, int b)
 
     if (a > b) std::swap(a, b);
 
-    // Visual swap via two moveTab calls (no tabInserted/tabRemoved triggered)
+    // Visual swap via two moveTab calls (no tabInserted/tabRemoved triggered).
+    // Per-tab state belongs to the pages, so nothing else needs to change.
     tabBar()->moveTab(a, b);
     tabBar()->moveTab(b - 1, a);
-
-    // Update MRU order: only a and b swap, all other indices unchanged
-    for (int& idx : m_mruOrder) {
-        if (idx == a) idx = b;
-        else if (idx == b) idx = a;
-    }
-
-    // Update pinned state
-    if (a < m_pinnedTabs.size() && b < m_pinnedTabs.size())
-        std::swap(m_pinnedTabs[a], m_pinnedTabs[b]);
-
-    updateTabButton(a);
-    updateTabButton(b);
-    QTimer::singleShot(0, this, [this]() {
-        mapCloseButtonsToTabs();
-        updateCloseButtonVisibility();
-    });
 }
 
 void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherIndex)
@@ -1062,8 +1262,10 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
     QIcon    otherIcon   = other->tabIcon(otherIndex);
     QVariant thisData    = tabBar()->tabData(thisIndex);
     QVariant otherData   = other->tabBar()->tabData(otherIndex);
-    bool     thisPinned  = isTabPinned(thisIndex);
-    bool     otherPinned = other->isTabPinned(otherIndex);
+    const TabState thisState  = m_tabStates.value(thisWidget);
+    const TabState otherState = other->m_tabStates.value(otherWidget);
+    const bool thisPreview  = thisWidget == m_previewPage;
+    const bool otherPreview = otherWidget == other->m_previewPage;
 
     // Block currentChanged and tabCountChanged during structural changes
     QSignalBlocker b1(this), b2(other);
@@ -1088,20 +1290,32 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
     b1.unblock();
     b2.unblock();
 
-    if (otherPinned) setTabPinned(thisIndex, true);
-    if (thisPinned)  other->setTabPinned(otherIndex, true);
+    // The pages carry their state to the other widget; pinning goes through
+    // setTabPinned so that the pin button is created
+    auto carry = [](MruTabWidget *to, QWidget *page, TabState state, bool preview) {
+        const bool pinned = state.pinned;
+        state.pinned = false;
+        to->m_tabStates[page] = state;
+        to->updateTabMarker(page);
+        if (preview)
+            to->setTabPreview(page, true);
+        if (pinned)
+            to->setTabPinned(page, true);
+    };
+    carry(this, otherWidget, otherState, otherPreview);
+    carry(other, thisWidget, thisState, thisPreview);
 
     // If this lost a pinned and gained an unpinned, unpinned count may exceed limit.
     // Pin the newly inserted tab instead of risking enforceTabLimit closing something.
-    if (thisPinned && !otherPinned && m_tabLimit > 0) {
-        if (count() - pinnedTabCount() > m_tabLimit)
-            setTabPinned(thisIndex, true);
+    if (thisState.pinned && !otherState.pinned && m_tabLimit > 0) {
+        if (limitedTabCount() > m_tabLimit)
+            setTabPinned(otherWidget, true);
     }
 
     // Symmetric: other lost a pinned and gained an unpinned
-    if (otherPinned && !thisPinned && other->m_tabLimit > 0) {
-        if (other->count() - other->pinnedTabCount() > other->m_tabLimit)
-            other->setTabPinned(otherIndex, true);
+    if (otherState.pinned && !thisState.pinned && other->m_tabLimit > 0) {
+        if (other->limitedTabCount() > other->m_tabLimit)
+            other->setTabPinned(thisWidget, true);
     }
 
     // Restore currentChanged state
@@ -1125,27 +1339,124 @@ QString MruTabWidget::tabPopupText(int index) const
 void MruTabWidget::setTabPinned(int tabIndex, bool pinned)
 {
     if (tabIndex < 0 || tabIndex >= count()) return;
+    setTabPinned(widget(tabIndex), pinned);
+}
 
-    // Ensure vector is large enough
-    if (tabIndex >= m_pinnedTabs.size()) {
-        m_pinnedTabs.resize(count());
-    }
+void MruTabWidget::setTabPinned(QWidget *page, bool pinned)
+{
+    if (!page || indexOf(page) < 0) return;
 
-    bool wasPinned = m_pinnedTabs[tabIndex];
-    m_pinnedTabs[tabIndex] = pinned;
+    TabState &state = m_tabStates[page];
+    if (state.pinned == pinned) return;
+    state.pinned = pinned;
 
     // Update visual appearance
-    updateTabButton(tabIndex);
+    updateTabButton(page);
 
-    // Update MRU list - remove pinned tabs, add unpinned ones
-    if (pinned) {
-        m_mruOrder.removeAll(tabIndex);
-    } else if (!wasPinned && !m_mruOrder.contains(tabIndex)) {
-        m_mruOrder.prepend(tabIndex);
-    }
-
-    // If unpinning, we might need to enforce the tab limit
-    if (wasPinned && !pinned) {
+    if (pinned && page == m_previewPage) {
+        // A pinned tab is kept, so it is no longer a preview
+        promotePreviewTab();
+    } else if (!pinned) {
+        // If unpinning, we might need to enforce the tab limit
         enforceTabLimit();
     }
+}
+
+void MruTabWidget::ensurePreviewStyle()
+{
+    if (m_previewStyleInstalled)
+        return;
+    m_previewStyleInstalled = true;
+#if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
+    const QString styleName = QApplication::style()->name();
+#else
+    const QString styleName = QApplication::style()->objectName();
+#endif
+    // The proxy owns its base style, so it gets its own instance of the application style
+    auto *previewStyle = new PreviewTabStyle(QStyleFactory::create(styleName), this);
+    previewStyle->setParent(this);
+    tabBar()->setStyle(previewStyle);
+}
+
+void MruTabWidget::setTabPreview(QWidget *page, bool preview)
+{
+    if (!page || indexOf(page) < 0) return;
+
+    QWidget *oldPreview = m_previewPage;
+    if (preview) {
+        if (page == oldPreview) return;
+        if (isTabPinned(page)) {
+            m_tabStates[page].pinned = false;
+            updateTabButton(page);
+        }
+        ensurePreviewStyle();
+        m_previewPage = page;
+    } else {
+        if (page != oldPreview) return;
+        m_previewPage = nullptr;
+    }
+    tabBar()->update();
+    // A former preview tab now counts toward the limit
+    if (oldPreview)
+        enforceTabLimit();
+}
+
+void MruTabWidget::promotePreviewTab()
+{
+    QWidget *page = m_previewPage;
+    if (!page) return;
+    m_previewPage = nullptr;
+    tabBar()->update();
+    emit previewTabPromoted(page);
+    enforceTabLimit();
+}
+
+void MruTabWidget::setTabKey(QWidget *page, const QString &key)
+{
+    if (!page || indexOf(page) < 0) return;
+    m_tabStates[page].key = key;
+}
+
+QString MruTabWidget::tabKey(QWidget *page) const
+{
+    return m_tabStates.value(page).key;
+}
+
+QWidget *MruTabWidget::findTab(const QString &key) const
+{
+    if (key.isEmpty()) return nullptr;
+    for (int i = 0; i < count(); ++i) {
+        if (m_tabStates.value(widget(i)).key == key)
+            return widget(i);
+    }
+    return nullptr;
+}
+
+void MruTabWidget::setTabBusy(QWidget *page, bool busy)
+{
+    if (!page || indexOf(page) < 0) return;
+    TabState &state = m_tabStates[page];
+    if (state.busy == busy) return;
+    state.busy = busy;
+    updateTabMarker(page);
+}
+
+bool MruTabWidget::isTabBusy(QWidget *page) const
+{
+    return m_tabStates.value(page).busy;
+}
+
+void MruTabWidget::setTabAttention(QWidget *page, bool attention)
+{
+    if (!page || indexOf(page) < 0) return;
+    if (attention && page == currentWidget()) return;
+    TabState &state = m_tabStates[page];
+    if (state.attention == attention) return;
+    state.attention = attention;
+    updateTabMarker(page);
+}
+
+bool MruTabWidget::tabAttention(QWidget *page) const
+{
+    return m_tabStates.value(page).attention;
 }

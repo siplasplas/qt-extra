@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(qt-extra VERSION 1.0.0 LANGUAGES CXX)
+project(qt-extra VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,6 +50,16 @@ install(FILES
 )
 install(EXPORT qt-extra-targets
     FILE        qt-extra-config.cmake
+    DESTINATION lib/cmake/qt-extra
+)
+# Lets clients write find_package(qt-extra 2 REQUIRED)
+include(CMakePackageConfigHelpers)
+write_basic_package_version_file(
+    ${CMAKE_CURRENT_BINARY_DIR}/qt-extra-config-version.cmake
+    VERSION       ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/qt-extra-config-version.cmake
     DESTINATION lib/cmake/qt-extra
 )
 
