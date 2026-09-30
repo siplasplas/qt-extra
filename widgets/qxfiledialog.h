@@ -11,6 +11,7 @@ class QComboBox;
 class QPushButton;
 class QToolButton;
 class QModelIndex;
+class QPoint;
 class QxFileBreadcrumb;
 
 class QxFileDialog : public QDialog
@@ -52,6 +53,7 @@ protected:
 private slots:
     void onItemActivated(const QModelIndex& index);
     void onCurrentItemChanged(const QModelIndex& current);
+    void onViewContextMenu(const QPoint& pos);
     void onFileEditReturnPressed();
     void onFilterChanged(int index);
 

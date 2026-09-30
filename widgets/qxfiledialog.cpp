@@ -19,6 +19,7 @@
 #include <QLabel>
 #include <QDir>
 #include <QFileInfo>
+#include <QMenu>
 #include <QDateTime>
 
 class DateFileSystemModel : public QFileSystemModel {
@@ -115,6 +116,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
     m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
 
     // Navigation bar
     m_backBtn    = new QToolButton; m_backBtn->setText("←");
@@ -181,6 +183,8 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     connect(m_fileEdit->lineEdit(), &QLineEdit::returnPressed,
             this, &QxFileDialog::onFileEditReturnPressed);
     connect(m_view, &QTreeView::activated, this, &QxFileDialog::onItemActivated);
+    connect(m_view, &QTreeView::customContextMenuRequested,
+            this, &QxFileDialog::onViewContextMenu);
     connect(m_view->selectionModel(), &QItemSelectionModel::currentChanged,
             this, [this](const QModelIndex& current, const QModelIndex&) {
                 onCurrentItemChanged(current);
@@ -342,6 +346,19 @@ void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
     } else {
         m_fileEdit->setCurrentText(m_model->fileName(current));
     }
+}
+
+void QxFileDialog::onViewContextMenu(const QPoint& pos)
+{
+    // TODO: actions are placeholders for now
+    QMenu menu(this);
+    if (m_view->indexAt(pos).isValid()) {
+        menu.addAction("Rename");
+        menu.addSeparator();
+    }
+    QMenu* newMenu = menu.addMenu("New");
+    newMenu->addAction("Folder");
+    menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
 
 void QxFileDialog::onFileEditReturnPressed()
