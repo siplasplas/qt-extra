@@ -54,7 +54,6 @@ private slots:
     void onItemActivated(const QModelIndex& index);
     void onCurrentItemChanged(const QModelIndex& current);
     void onViewContextMenu(const QPoint& pos);
-    void onFileEditReturnPressed();
     void onFilterChanged(int index);
 
 private:
@@ -65,6 +64,7 @@ private:
     void goUp();
     void updateNavButtons();
     void applyCurrentFilter();
+    bool consumeTypedPath();
     bool tryAccept();
 
     struct FilterEntry {
@@ -89,5 +89,6 @@ private:
     QString     m_defaultSuffix;
     QStringList m_history;
     int         m_historyPos = -1;
+    bool        m_nameFromSelection = false;  // file edit filled from the view, not typed
     QList<FilterEntry> m_filters;
 };

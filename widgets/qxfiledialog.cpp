@@ -23,6 +23,9 @@
 #include <QMessageBox>
 #include <QStyledItemDelegate>
 #include <QDateTime>
+#include <QStorageInfo>
+
+#include <algorithm>
 
 class DateFileSystemModel : public QFileSystemModel {
     int m_sizeBase = 1000;
@@ -203,8 +206,12 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileDialog::goUp);
     connect(m_breadcrumb, &QxFileBreadcrumb::pathActivated,
             this, [this](const QString& path) { navigateTo(path); });
-    connect(m_fileEdit->lineEdit(), &QLineEdit::returnPressed,
-            this, &QxFileDialog::onFileEditReturnPressed);
+    // Text typed, pasted or picked from history is resolved as a path on accept;
+    // a name filled in from the view selection is accepted as is
+    connect(m_fileEdit->lineEdit(), &QLineEdit::textEdited,
+            this, [this] { m_nameFromSelection = false; });
+    connect(m_fileEdit, QOverload<int>::of(&QComboBox::activated),
+            this, [this] { m_nameFromSelection = false; });
     connect(m_view, &QTreeView::activated, this, &QxFileDialog::onItemActivated);
     connect(m_view, &QTreeView::customContextMenuRequested,
             this, &QxFileDialog::onViewContextMenu);
@@ -214,6 +221,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
             });
     connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &QxFileDialog::onFilterChanged);
+    // Enter in the file edit reaches tryAccept() through the default button only
     connect(m_acceptBtn, &QPushButton::clicked, this, [this]{ tryAccept(); });
     connect(cancelBtn,   &QPushButton::clicked, this, &QDialog::reject);
 
@@ -369,6 +377,7 @@ void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
     } else {
         m_fileEdit->setCurrentText(m_model->fileName(current));
     }
+    m_nameFromSelection = true;
 }
 
 void QxFileDialog::onViewContextMenu(const QPoint& pos)
@@ -408,18 +417,78 @@ void QxFileDialog::createFolder()
     m_view->edit(index);
 }
 
-void QxFileDialog::onFileEditReturnPressed()
-{
-    tryAccept();
-}
-
 void QxFileDialog::onFilterChanged(int /*index*/)
 {
     applyCurrentFilter();
 }
 
+bool QxFileDialog::consumeTypedPath()
+{
+    const QString text = m_fileEdit->currentText().trimmed();
+#ifdef Q_OS_WIN
+    auto isSep = [](QChar c) { return c == '/' || c == '\\'; };
+    const bool hasDrive = text.size() >= 2 && text[1] == ':' && text[0].isLetter();
+#else
+    auto isSep = [](QChar c) { return c == '/'; };
+    const bool hasDrive = false;
+#endif
+    if (text.isEmpty())
+        return false;
+
+    // Starting point: drive root, file-system root, or the current directory
+    QDir dir(m_currentPath);
+    int pos = 0;
+    if (hasDrive) {
+        dir.setPath(text.left(2) + '/');
+        pos = 2;
+    } else if (isSep(text[0])) {
+#ifdef Q_OS_WIN
+        dir.setPath(QStorageInfo(m_currentPath).rootPath());  // root of the current drive
+#else
+        dir.setPath(QDir::rootPath());
+#endif
+    }
+
+    // Enter each existing directory component; stop at the last component
+    // (the file name) or at the first one that cannot be entered
+    for (;;) {
+        while (pos < text.size() && isSep(text[pos])) ++pos;
+        int end = pos;
+        while (end < text.size() && !isSep(text[end])) ++end;
+        if (end == text.size()) break;
+        const QString part = text.mid(pos, end - pos);
+        if (part == "..")
+            dir.cdUp();  // stays put at the root
+        else if (part != "." && !dir.cd(part))
+            break;
+        pos = end;
+    }
+
+    // Last component: a directory is entered too; anything else is left
+    // as the file name for the normal accept logic
+    QString rest = text.mid(pos);
+    const bool enterLast = rest.isEmpty() || rest == "." || rest == ".."
+                        || QFileInfo(dir.filePath(rest)).isDir();
+    const bool stoppedEarly = std::any_of(rest.begin(), rest.end(), isSep);
+    if (enterLast && !stoppedEarly) {
+        if (rest == "..") dir.cdUp();
+        else if (!rest.isEmpty() && rest != ".") dir.cd(rest);
+        rest.clear();
+    }
+
+    const QString target = dir.canonicalPath();
+    if (target != m_currentPath)
+        navigateTo(target);
+    m_fileEdit->setCurrentText(rest);
+    m_nameFromSelection = false;
+    return enterLast || stoppedEarly;
+}
+
 bool QxFileDialog::tryAccept()
 {
+    // Directories (and unresolvable paths) only navigate; a file accepts at once
+    if (!m_nameFromSelection && consumeTypedPath()) return false;
+
     QString file = selectedFile();
     if (file.isEmpty()) return false;
 
