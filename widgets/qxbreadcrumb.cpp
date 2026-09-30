@@ -1,6 +1,7 @@
 #include "qxbreadcrumb.h"
 
 #include <QFont>
+#include <QFontMetrics>
 #include <QHBoxLayout>
 #include <QMenu>
 #include <QToolButton>
@@ -30,6 +31,8 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
             segment->setText(m_segments.at(index));
             segment->setAutoRaise(true);
             segment->setStyleSheet("QToolButton { padding: 0px 2px; }");
+            // Styles (e.g. Windows) impose a minimum button width; size to the text instead
+            segment->setFixedWidth(segment->fontMetrics().horizontalAdvance(segment->text()) + 8);
             connect(segment, &QToolButton::clicked, this,
                     [this, index]() { emit segmentActivated(index); });
             m_layout->addWidget(segment);
@@ -43,6 +46,7 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
         font.setBold(true);
         font.setPointSize(font.pointSize() + 3);
         arrow->setFont(font);
+        arrow->setFixedWidth(QFontMetrics(font).horizontalAdvance(arrow->text()) + 4);
         auto* menu = new QMenu(arrow);
         connect(menu, &QMenu::aboutToShow, this, [this, index, menu]() {
             menu->clear();
