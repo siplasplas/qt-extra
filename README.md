@@ -142,6 +142,28 @@ metadata reads or background scans. `directory()` returns the last browsed
 directory after either acceptance or cancellation. Existing static helpers
 keep their signatures and default behavior.
 
+Since 2.2.0, `setFileName()` selects an existing default file in the list and scrolls it into
+view, including when the directory is still loading. A plain filename uses the
+directory established by `setDirectory()`. A relative path is resolved against
+that directory; an absolute path uses its own parent directory. For either
+path form, the chooser enters the parent directory before selecting the file,
+overriding the initial directory. A missing file is not selected, and its name
+remains in the edit field (useful for Save). Open/Save interpret the final component
+as a filename, even if a directory has that name. Directory mode instead treats
+the entire value as a directory: a directory name, a relative directory path or
+an absolute directory path is entered directly when it exists. Typing or making
+a new selection cancels a pending default selection.
+
+Open is single-file by default. Since 2.2.0, call `setMultipleSelectionEnabled(true)` to
+select several files with Ctrl/Shift and retrieve them with `selectedFiles()`;
+`selectedFile()` returns the first selected file in list order. The static
+`getOpenFileNames()` helper enables this mode and returns a `QStringList`, empty
+on cancel. Directories remain navigable and are excluded from multiple-file
+results. A typed/pasted path selects one file, overriding the view selection;
+the quoted list displayed for multiple selection is not a typed-path syntax.
+Save and Directory always select one item, even if multiple selection is
+requested. Existing single-file helpers and clients remain compatible.
+
 Audio inspection reads binary headers without decoding or launching players:
 PCM/IEEE-float RIFF WAV (including extra chunks and padding), MPEG audio frames
 (including variable bitrate MP3), and single-stream Ogg Vorbis/Opus are supported.
@@ -182,7 +204,11 @@ The demo window offers separate "Show duration" (audio) and "Show size" (image
 width/height) checkboxes, both off by default. These controls are outside the
 file chooser; its normal Name, Size (file bytes) and Date Modified columns stay
 visible in open/save mode. The demo remembers the last directory
-on both outcomes. Manually check header sorting, navigation, F2 rename, new
+on both outcomes. Its default-file field accepts a name or a relative/absolute file path, and
+"Use last selected" fills it from the last accepted file. "Select multiple files
+(Open only)" applies to custom, native and Qt choosers; Save stays single-file.
+Directory choosers have a separate default-directory field.
+Manually check header sorting, navigation, F2 rename, new
 folders, and pasted absolute/relative paths. After installing this static
 library, rebuild/relink agentdeskt and gemini-commander to use the new code;
 clients using `find_package(qt-extra 2 REQUIRED)` remain source-compatible.

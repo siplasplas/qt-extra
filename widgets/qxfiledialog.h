@@ -1,6 +1,7 @@
 #pragma once
 #include <QDialog>
 #include <QStringList>
+#include <QSet>
 
 class QFileSystemModel;
 class QListWidget;
@@ -33,8 +34,10 @@ public:
     void    setDefaultSuffix(const QString& suffix);
     void    setSizeUnit(SizeUnit unit);
     void    setFileName(const QString& name);
+    void    setMultipleSelectionEnabled(bool enabled);
     void    setHistory(const QStringList& paths);
     QString selectedFile() const;
+    QStringList selectedFiles() const;
 
     static QString getOpenFileName(QWidget* parent,
                                    const QString& caption,
@@ -47,6 +50,11 @@ public:
                                    const QString& filter = {},
                                    const QString& defaultName = {},
                                    const QStringList& history = {});
+    static QStringList getOpenFileNames(QWidget* parent,
+                                       const QString& caption,
+                                       const QString& dir,
+                                       const QString& filter = {},
+                                       const QStringList& history = {});
     static QString getExistingDirectory(QWidget* parent,
                                         const QString& caption,
                                         const QString& dir,
@@ -72,6 +80,9 @@ private:
     void applyCurrentFilter();
     bool consumeTypedPath();
     bool tryAccept();
+    void scheduleFileSelection();
+    void selectPendingFile();
+    void updateSelectionName();
 
     struct FilterEntry {
         QString     display;
@@ -98,5 +109,9 @@ private:
     QStringList m_history;
     int         m_historyPos = -1;
     bool        m_nameFromSelection = false;  // file edit filled from the view, not typed
+    bool        m_multipleSelection = false;
+    bool        m_selectionScheduled = false;
+    QString     m_pendingFile;
+    QSet<QString> m_loadedDirectories;
     QList<FilterEntry> m_filters;
 };

@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <QLineEdit>
 #include <QMainWindow>
 #include <QWidget>
 #include <QVBoxLayout>
@@ -301,6 +302,23 @@ int main(int argc, char* argv[])
 
     auto* saveAsCheck = new QCheckBox("Save as");
     fileLayout->addWidget(saveAsCheck);
+    auto* multipleCheck = new QCheckBox("Select multiple files (Open only)");
+    fileLayout->addWidget(multipleCheck);
+    QObject::connect(saveAsCheck, &QCheckBox::toggled, multipleCheck, [multipleCheck](bool save) {
+        multipleCheck->setEnabled(!save);
+    });
+    auto* defaultFileRow = new QHBoxLayout;
+    auto* defaultFileEdit = new QLineEdit;
+    defaultFileEdit->setPlaceholderText("Default file (name, relative or absolute path)");
+    auto* lastFileBtn = new QPushButton("Use last selected");
+    lastFileBtn->setEnabled(false);
+    defaultFileRow->addWidget(defaultFileEdit, 1);
+    defaultFileRow->addWidget(lastFileBtn);
+    fileLayout->addLayout(defaultFileRow);
+    QString lastSelectedFile;
+    QObject::connect(lastFileBtn, &QPushButton::clicked, [&, defaultFileEdit] {
+        defaultFileEdit->setText(lastSelectedFile);
+    });
     auto* audioMetadataCheck = new QCheckBox("Show duration");
     audioMetadataCheck->setToolTip("Audio duration for WAV, MP3 and Vorbis/Opus; unknown stays blank.");
     auto* imageMetadataCheck = new QCheckBox("Show size");
@@ -308,6 +326,18 @@ int main(int argc, char* argv[])
     fileLayout->addWidget(audioMetadataCheck);
     fileLayout->addWidget(imageMetadataCheck);
     QString browserDirectory = home;
+    auto recordFiles = [&](const QString& action, const QStringList& files) {
+        if (files.isEmpty()) {
+            log(action);
+            return;
+        }
+        lastSelectedFile = files.first();
+        lastFileBtn->setEnabled(true);
+        for (const QString& file : files) {
+            addToHistory(fileHistory, file);
+            log(action, file);
+        }
+    };
 
     auto* fileBtnRow = new QHBoxLayout;
     auto* fileNativeBtn  = new QPushButton("native");
@@ -323,24 +353,37 @@ int main(int argc, char* argv[])
     fileLayout->addLayout(fileBtnRow);
 
     QObject::connect(fileNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
+        const QString initial = defaultFileEdit->text().trimmed().isEmpty()
+            ? browserDirectory : QDir(browserDirectory).filePath(defaultFileEdit->text().trimmed());
         if (!saveAsCheck->isChecked()) {
-            log("open native", QFileDialog::getOpenFileName(&mainWindow, "Open File", home, fileFilter));
+            if (multipleCheck->isChecked()) {
+                recordFiles("open native", QFileDialog::getOpenFileNames(&mainWindow, "Open Files", initial, fileFilter));
+            } else {
+                const QString file = QFileDialog::getOpenFileName(&mainWindow, "Open File", initial, fileFilter);
+                recordFiles("open native", file.isEmpty() ? QStringList{} : QStringList{file});
+            }
         } else {
-            log("save native", QFileDialog::getSaveFileName(&mainWindow, "Save File", home, fileFilter));
+            const QString file = QFileDialog::getSaveFileName(&mainWindow, "Save File", initial, fileFilter);
+            recordFiles("save native", file.isEmpty() ? QStringList{} : QStringList{file});
         }
     });
 
     QObject::connect(fileQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QFileDialog dlg(&mainWindow, !saveAsCheck->isChecked() ? "Open File" : "Save File", home, fileFilter);
+        QFileDialog dlg(&mainWindow, !saveAsCheck->isChecked() ? "Open File" : "Save File", browserDirectory, fileFilter);
         dlg.setOption(QFileDialog::DontUseNativeDialog, true);
         if (!saveAsCheck->isChecked()) {
-            dlg.setFileMode(QFileDialog::ExistingFile);
+            dlg.setFileMode(multipleCheck->isChecked() ? QFileDialog::ExistingFiles : QFileDialog::ExistingFile);
         } else {
             dlg.setAcceptMode(QFileDialog::AcceptSave);
         }
+        if (!defaultFileEdit->text().trimmed().isEmpty()) {
+            const QFileInfo initial(QDir(browserDirectory).filePath(defaultFileEdit->text().trimmed()));
+            dlg.setDirectory(initial.absolutePath());
+            dlg.selectFile(initial.fileName());
+        }
         const QString tag = !saveAsCheck->isChecked() ? "open qt" : "save qt";
         if (dlg.exec() == QDialog::Accepted)
-            log(tag, dlg.selectedFiles().first());
+            recordFiles(tag, dlg.selectedFiles());
         else
             log(tag);
     });
@@ -350,13 +393,14 @@ int main(int argc, char* argv[])
         dlg.setDirectory(browserDirectory);
         dlg.setNameFilter(fileFilter);
         dlg.setHistory(fileHistory);
+        dlg.setMultipleSelectionEnabled(multipleCheck->isChecked());
         dlg.setAudioDurationVisible(audioMetadataCheck->isChecked());
         dlg.setImageDimensionsVisible(imageMetadataCheck->isChecked());
-        if (saveAsCheck->isChecked()) dlg.setFileName("untitled.txt");
-        const QString file = dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
+        if (!defaultFileEdit->text().trimmed().isEmpty()) dlg.setFileName(defaultFileEdit->text().trimmed());
+        else if (saveAsCheck->isChecked()) dlg.setFileName("untitled.txt");
+        const QStringList files = dlg.exec() == QDialog::Accepted ? dlg.selectedFiles() : QStringList{};
         browserDirectory = dlg.directory();
-        addToHistory(fileHistory, file);
-        log(saveAsCheck->isChecked() ? "save browser" : "open browser", file);
+        recordFiles(saveAsCheck->isChecked() ? "save browser" : "open browser", files);
         log("last browser directory", browserDirectory);
     });
 
@@ -364,17 +408,21 @@ int main(int argc, char* argv[])
         if (!saveAsCheck->isChecked()) {
             QString f = QxRecentDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, &fileRecent);
-            log("open dialog", f);
+            recordFiles("open dialog", f.isEmpty() ? QStringList{} : QStringList{f});
         } else {
             QString f = QxRecentDialog::getSaveFileName(
                 &mainWindow, "Save File", home, fileFilter, &fileRecent);
-            log("save dialog", f);
+            recordFiles("save dialog", f.isEmpty() ? QStringList{} : QStringList{f});
         }
     });
 
     // --- Directory dialog demo ---
     auto* dirGroup = new QGroupBox("Directory");
     auto* dirLayout = new QVBoxLayout(dirGroup);
+    auto* defaultDirEdit = new QLineEdit;
+    defaultDirEdit->setPlaceholderText("Default directory (absolute or relative path)");
+    dirLayout->addWidget(defaultDirEdit);
+    QString directoryBrowserPath = home;
 
     auto* dirBtnRow = new QHBoxLayout;
     auto* dirNativeBtn = new QPushButton("native");
@@ -389,11 +437,13 @@ int main(int argc, char* argv[])
     dirLayout->addLayout(dirBtnRow);
 
     QObject::connect(dirNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        log("dir native", QFileDialog::getExistingDirectory(&mainWindow, "Select Directory", home));
+        const QString initial = QDir(directoryBrowserPath).filePath(defaultDirEdit->text().trimmed());
+        log("dir native", QFileDialog::getExistingDirectory(&mainWindow, "Select Directory", initial));
     });
 
     QObject::connect(dirQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QFileDialog dlg(&mainWindow, "Select Directory", home);
+        const QString initial = QDir(directoryBrowserPath).filePath(defaultDirEdit->text().trimmed());
+        QFileDialog dlg(&mainWindow, "Select Directory", initial);
         dlg.setOption(QFileDialog::DontUseNativeDialog, true);
         dlg.setFileMode(QFileDialog::Directory);
         if (dlg.exec() == QDialog::Accepted)
@@ -403,8 +453,12 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(dirCustomBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QString d = QxFileDialog::getExistingDirectory(
-            &mainWindow, "Select Directory", home, dirHistory);
+        QxFileDialog dlg(&mainWindow, QxFileDialog::Directory);
+        dlg.setDirectory(directoryBrowserPath);
+        dlg.setHistory(dirHistory);
+        if (!defaultDirEdit->text().trimmed().isEmpty()) dlg.setFileName(defaultDirEdit->text().trimmed());
+        const QString d = dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
+        directoryBrowserPath = dlg.directory();
         addToHistory(dirHistory, d);
         log("dir custom", d);
     });

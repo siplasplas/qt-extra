@@ -25,6 +25,8 @@
 #include <QStyledItemDelegate>
 #include <QDateTime>
 #include <QStorageInfo>
+#include <QTimer>
+#include <QSignalBlocker>
 
 #include <algorithm>
 
@@ -161,6 +163,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
                                           header->fontMetrics().horizontalAdvance(samples[column - 1])) + 32);
     }
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
+    m_view->setSelectionMode(QAbstractItemView::SingleSelection);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->setEditTriggers(QAbstractItemView::EditKeyPressed);  // F2; double-click still activates
     m_view->setItemDelegate(new RenameDelegate(m_view));
@@ -229,10 +232,15 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
             this, [this](const QString& path) { navigateTo(path); });
     // Text typed, pasted or picked from history is resolved as a path on accept;
     // a name filled in from the view selection is accepted as is
-    connect(m_fileEdit->lineEdit(), &QLineEdit::textEdited,
-            this, [this] { m_nameFromSelection = false; });
-    connect(m_fileEdit, QOverload<int>::of(&QComboBox::activated),
-            this, [this] { m_nameFromSelection = false; });
+    auto typedName = [this] {
+        m_pendingFile.clear();
+        m_nameFromSelection = false;
+        // A typed path supersedes any multiple selection without changing the text.
+        const QSignalBlocker blocker(m_view->selectionModel());
+        m_view->clearSelection();
+    };
+    connect(m_fileEdit->lineEdit(), &QLineEdit::textEdited, this, typedName);
+    connect(m_fileEdit, QOverload<int>::of(&QComboBox::activated), this, typedName);
     connect(m_view, &QTreeView::activated, this, &QxFileDialog::onItemActivated);
     connect(m_view, &QTreeView::customContextMenuRequested,
             this, &QxFileDialog::onViewContextMenu);
@@ -240,6 +248,16 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
             this, [this](const QModelIndex& current, const QModelIndex&) {
                 onCurrentItemChanged(current);
             });
+    connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
+            this, [this] {
+                if (m_multipleSelection) updateSelectionName();
+            });
+    connect(m_proxy, &QAbstractItemModel::rowsInserted, this, [this] { scheduleFileSelection(); });
+    connect(m_proxy, &QAbstractItemModel::layoutChanged, this, [this] { scheduleFileSelection(); });
+    connect(m_model, &QFileSystemModel::directoryLoaded, this, [this](const QString& path) {
+        m_loadedDirectories.insert(QDir::cleanPath(path));
+        scheduleFileSelection();
+    });
     connect(m_filterCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
             this, &QxFileDialog::onFilterChanged);
     // Enter in the file edit reaches tryAccept() through the default button only
@@ -300,8 +318,90 @@ void QxFileDialog::setSizeUnit(SizeUnit unit)
 
 void QxFileDialog::setFileName(const QString& name)
 {
+    m_pendingFile.clear();
+    {
+        const QSignalBlocker blocker(m_view->selectionModel());
+        m_view->clearSelection();
+    }
     m_fileEdit->setCurrentText(name);
     m_nameFromSelection = false;
+    if (name.isEmpty()) return;
+    const QFileInfo info(QDir(m_currentPath).filePath(name));
+    if (m_mode == Directory) {
+        if (info.isDir()) {
+            navigateTo(info.absoluteFilePath());
+            m_fileEdit->clearEditText();
+        }
+        return;
+    }
+    if (QDir(info.absolutePath()).exists()) {
+        if (QDir(info.absolutePath()).canonicalPath() != m_currentPath)
+            navigateTo(info.absolutePath());
+        m_fileEdit->setCurrentText(info.fileName());
+        m_nameFromSelection = false;
+        if (info.isFile()) {
+            m_pendingFile = QDir(m_currentPath).filePath(info.fileName());
+            scheduleFileSelection();
+        }
+    }
+}
+
+void QxFileDialog::setMultipleSelectionEnabled(bool enabled)
+{
+    enabled = enabled && m_mode == Open;
+    if (m_multipleSelection == enabled) return;
+    const QModelIndex current = m_view->currentIndex();
+    m_multipleSelection = enabled;
+    m_view->setSelectionMode(enabled ? QAbstractItemView::ExtendedSelection : QAbstractItemView::SingleSelection);
+    if (!enabled && current.isValid()) {
+        m_view->selectionModel()->setCurrentIndex(current, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        onCurrentItemChanged(current);
+    } else if (enabled && m_nameFromSelection) {
+        updateSelectionName();
+    }
+}
+
+void QxFileDialog::scheduleFileSelection()
+{
+    if (m_pendingFile.isEmpty() || m_selectionScheduled) return;
+    m_selectionScheduled = true;
+    QTimer::singleShot(0, this, [this] {
+        m_selectionScheduled = false;
+        selectPendingFile();
+    });
+}
+
+void QxFileDialog::selectPendingFile()
+{
+    if (m_pendingFile.isEmpty() || !isVisible() || !m_loadedDirectories.contains(m_currentPath)) return;
+    const QModelIndex source = m_model->index(m_pendingFile);
+    const QModelIndex index = m_proxy->mapFromSource(m_metadata->mapFromSource(source));
+    if (!index.isValid() || index.parent() != m_view->rootIndex()) return;
+    m_pendingFile.clear();
+    m_view->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+    m_view->doItemsLayout();
+    m_view->scrollTo(index, QAbstractItemView::EnsureVisible);
+}
+
+void QxFileDialog::updateSelectionName()
+{
+    auto rows = m_view->selectionModel()->selectedRows(0);
+    std::sort(rows.begin(), rows.end(), [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
+    QStringList names;
+    for (const auto& row : rows) {
+        const QModelIndex source = m_metadata->mapToSource(m_proxy->mapToSource(row));
+        if (m_model->fileInfo(source).isFile()) names.append(m_model->fileName(source));
+    }
+    if (names.size() > 1) {
+        for (QString& name : names) {
+            name.replace("\\", "\\\\");
+            name.replace("\"", "\\\"");
+            name = '"' + name + '"';
+        }
+    }
+    m_fileEdit->setCurrentText(names.join(' '));
+    m_nameFromSelection = !rows.isEmpty();
+    if (!rows.isEmpty()) m_pendingFile.clear();
 }
 
 void QxFileDialog::setHistory(const QStringList& paths)
@@ -312,6 +412,10 @@ void QxFileDialog::setHistory(const QStringList& paths)
     m_fileEdit->addItems(paths);
     m_fileEdit->clearEditText();
     m_fileEdit->blockSignals(false);
+    m_pendingFile.clear();
+    m_nameFromSelection = false;
+    const QSignalBlocker blocker(m_view->selectionModel());
+    m_view->clearSelection();
 }
 
 void QxFileDialog::setDefaultSuffix(const QString& suffix)
@@ -321,11 +425,28 @@ void QxFileDialog::setDefaultSuffix(const QString& suffix)
 
 QString QxFileDialog::selectedFile() const
 {
+    if (m_multipleSelection && m_nameFromSelection) return selectedFiles().value(0);
     QString name = m_fileEdit->currentText().trimmed();
     if (name.isEmpty())
         return m_mode == Directory ? m_currentPath : QString{};
     if (QFileInfo(name).isAbsolute()) return name;
     return QDir(m_currentPath).filePath(name);
+}
+
+QStringList QxFileDialog::selectedFiles() const
+{
+    if (m_multipleSelection && m_nameFromSelection) {
+        auto rows = m_view->selectionModel()->selectedRows(0);
+        std::sort(rows.begin(), rows.end(), [](const QModelIndex& a, const QModelIndex& b) { return a.row() < b.row(); });
+        QStringList files;
+        for (const auto& row : rows) {
+            const QModelIndex source = m_metadata->mapToSource(m_proxy->mapToSource(row));
+            if (m_model->fileInfo(source).isFile()) files.append(m_model->filePath(source));
+        }
+        return files;
+    }
+    const QString file = selectedFile();
+    return file.isEmpty() ? QStringList{} : QStringList{file};
 }
 
 // ---------------------------------------------------------------------------
@@ -334,6 +455,7 @@ void QxFileDialog::showEvent(QShowEvent* event)
 {
     QDialog::showEvent(event);
     m_metadata->setActive(true);
+    scheduleFileSelection();
     if (m_mode == Save && !m_fileEdit->currentText().isEmpty()) {
         m_fileEdit->setFocus();
         m_fileEdit->lineEdit()->selectAll();
@@ -343,6 +465,7 @@ void QxFileDialog::showEvent(QShowEvent* event)
 void QxFileDialog::hideEvent(QHideEvent* event)
 {
     m_metadata->setActive(false);
+    m_pendingFile.clear();
     QDialog::hideEvent(event);
 }
 
@@ -351,6 +474,8 @@ void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
     QDir dir(path);
     if (!dir.exists()) return;
     const QString canonical = dir.canonicalPath();
+    m_pendingFile.clear();
+    m_nameFromSelection = false;
 
     if (pushToHistory) {
         while (m_history.size() > m_historyPos + 1)
@@ -366,6 +491,7 @@ void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
     m_view->setRootIndex(m_proxy->mapFromSource(m_metadata->mapFromSource(m_model->index(canonical))));
     m_view->clearSelection();
     if (m_mode != Save) m_fileEdit->clearEditText();
+    m_nameFromSelection = false;
     updateNavButtons();
 }
 
@@ -415,6 +541,8 @@ void QxFileDialog::onItemActivated(const QModelIndex& index)
     if (m_model->isDir(source)) {
         navigateTo(m_model->filePath(source));
     } else {
+        if (m_multipleSelection && !m_view->selectionModel()->isSelected(index))
+            m_view->selectionModel()->setCurrentIndex(index.siblingAtColumn(0), QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
         m_fileEdit->setCurrentText(m_model->fileName(source));
         m_nameFromSelection = true;
         tryAccept();
@@ -424,6 +552,11 @@ void QxFileDialog::onItemActivated(const QModelIndex& index)
 void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
 {
     if (!current.isValid()) return;
+    m_pendingFile.clear();
+    if (m_multipleSelection) {
+        updateSelectionName();
+        return;
+    }
     const QModelIndex source = m_metadata->mapToSource(m_proxy->mapToSource(current));
     if (m_mode == Directory) {
         m_fileEdit->setCurrentText(m_model->fileName(source));
@@ -542,6 +675,14 @@ bool QxFileDialog::consumeTypedPath()
 
 bool QxFileDialog::tryAccept()
 {
+    if (m_multipleSelection && m_nameFromSelection) {
+        const QStringList files = selectedFiles();
+        if (files.isEmpty()) return false;
+        for (const QString& file : files)
+            if (!QFileInfo(file).isFile()) return false;
+        accept();
+        return true;
+    }
     // Directories (and unresolvable paths) only navigate; a file accepts at once
     if (!m_nameFromSelection && consumeTypedPath()) return false;
 
@@ -616,9 +757,22 @@ QString QxFileDialog::getSaveFileName(QWidget* parent, const QString& caption,
     if (!caption.isEmpty())     dlg.setWindowTitle(caption);
     if (!dir.isEmpty())         dlg.setDirectory(dir);
     if (!filter.isEmpty())      dlg.setNameFilter(filter);
-    if (!defaultName.isEmpty()) dlg.setFileName(defaultName);
     if (!history.isEmpty())     dlg.setHistory(history);
+    if (!defaultName.isEmpty()) dlg.setFileName(defaultName);
     return dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
+}
+
+QStringList QxFileDialog::getOpenFileNames(QWidget* parent, const QString& caption,
+                                         const QString& dir, const QString& filter,
+                                         const QStringList& history)
+{
+    QxFileDialog dlg(parent, Open);
+    dlg.setMultipleSelectionEnabled(true);
+    if (!caption.isEmpty()) dlg.setWindowTitle(caption);
+    if (!dir.isEmpty())     dlg.setDirectory(dir);
+    if (!filter.isEmpty())  dlg.setNameFilter(filter);
+    if (!history.isEmpty()) dlg.setHistory(history);
+    return dlg.exec() == QDialog::Accepted ? dlg.selectedFiles() : QStringList{};
 }
 
 QString QxFileDialog::getExistingDirectory(QWidget* parent, const QString& caption,
