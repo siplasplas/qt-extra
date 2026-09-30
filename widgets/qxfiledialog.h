@@ -11,6 +11,7 @@ class QComboBox;
 class QPushButton;
 class QToolButton;
 class QModelIndex;
+class QxFileBreadcrumb;
 
 class QxFileDialog : public QDialog
 {
@@ -47,12 +48,10 @@ public:
 
 protected:
     void showEvent(QShowEvent* event) override;
-    bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
     void onItemActivated(const QModelIndex& index);
     void onCurrentItemChanged(const QModelIndex& current);
-    void onPathEditReturnPressed();
     void onFileEditReturnPressed();
     void onFilterChanged(int index);
 
@@ -74,7 +73,7 @@ private:
     QFileSystemModel* m_model;
     QListWidget*      m_places;
     QTreeView*        m_view;
-    QComboBox*        m_pathEdit;
+    QxFileBreadcrumb* m_breadcrumb;
     QComboBox*        m_fileEdit;
     QComboBox*        m_filterCombo;
     QToolButton*      m_backBtn;

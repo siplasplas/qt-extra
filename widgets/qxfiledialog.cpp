@@ -1,4 +1,5 @@
 #include "qxfiledialog.h"
+#include "qxfilebreadcrumb.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -19,7 +20,6 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QDateTime>
-#include <QKeyEvent>
 
 class DateFileSystemModel : public QFileSystemModel {
     int m_sizeBase = 1000;
@@ -65,7 +65,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     m_model->setRootPath(QDir::rootPath());
     m_model->setFilter(mode == Directory
         ? QDir::Dirs  | QDir::NoDotAndDotDot
-        : QDir::AllEntries | QDir::NoDotAndDotDot);
+        : QDir::AllEntries | QDir::AllDirs | QDir::NoDotAndDotDot);
 
     // Places panel (left)
     m_places = new QListWidget;
@@ -120,17 +120,14 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     m_backBtn    = new QToolButton; m_backBtn->setText("←");
     m_forwardBtn = new QToolButton; m_forwardBtn->setText("→");
     m_upBtn      = new QToolButton; m_upBtn->setText("↑");
-    m_pathEdit = new QComboBox;
-    m_pathEdit->setEditable(true);
-    m_pathEdit->setInsertPolicy(QComboBox::NoInsert);
-    m_pathEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_pathEdit->lineEdit()->setPlaceholderText("Path — type or paste and press Enter");
+    m_breadcrumb = new QxFileBreadcrumb;
+    m_breadcrumb->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
 
     auto* navLayout = new QHBoxLayout;
     navLayout->addWidget(m_backBtn);
     navLayout->addWidget(m_forwardBtn);
     navLayout->addWidget(m_upBtn);
-    navLayout->addWidget(m_pathEdit, 1);
+    navLayout->addWidget(m_breadcrumb, 1);
 
     // Bottom bar
     m_fileEdit = new QComboBox;
@@ -179,9 +176,8 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     connect(m_backBtn,    &QToolButton::clicked, this, &QxFileDialog::goBack);
     connect(m_forwardBtn, &QToolButton::clicked, this, &QxFileDialog::goForward);
     connect(m_upBtn,      &QToolButton::clicked, this, &QxFileDialog::goUp);
-    m_pathEdit->lineEdit()->installEventFilter(this);
-    connect(m_pathEdit, QOverload<int>::of(&QComboBox::activated), this,
-            [this](int) { navigateTo(m_pathEdit->currentText()); });
+    connect(m_breadcrumb, &QxFileBreadcrumb::pathActivated,
+            this, [this](const QString& path) { navigateTo(path); });
     connect(m_fileEdit->lineEdit(), &QLineEdit::returnPressed,
             this, &QxFileDialog::onFileEditReturnPressed);
     connect(m_view, &QTreeView::activated, this, &QxFileDialog::onItemActivated);
@@ -195,6 +191,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     connect(cancelBtn,   &QPushButton::clicked, this, &QDialog::reject);
 
     setNameFilter("All Files (*)");
+    navigateTo(QDir::currentPath());
 }
 
 void QxFileDialog::setDirectory(const QString& path)
@@ -236,20 +233,6 @@ void QxFileDialog::setHistory(const QStringList& paths)
     m_fileEdit->addItems(paths);
     m_fileEdit->clearEditText();
     m_fileEdit->blockSignals(false);
-
-    // Top path combo: unique parent directories, preserving order
-    QStringList dirs;
-    for (const QString& p : paths) {
-        QString dir = QFileInfo(p).isDir() ? p : QFileInfo(p).path();
-        if (!dir.isEmpty() && !dirs.contains(dir))
-            dirs.append(dir);
-    }
-    const QString current = m_pathEdit->currentText();
-    m_pathEdit->blockSignals(true);
-    m_pathEdit->clear();
-    m_pathEdit->addItems(dirs);
-    m_pathEdit->setCurrentText(current);
-    m_pathEdit->blockSignals(false);
 }
 
 void QxFileDialog::setDefaultSuffix(const QString& suffix)
@@ -291,10 +274,11 @@ void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
     }
 
     m_currentPath = canonical;
-    m_pathEdit->setCurrentText(canonical);
+    if (m_breadcrumb->path() != canonical)
+        m_breadcrumb->setPath(canonical);
     m_view->setRootIndex(m_model->index(canonical));
     m_view->clearSelection();
-    if (m_mode == Directory) m_fileEdit->clearEditText();
+    if (m_mode != Save) m_fileEdit->clearEditText();
     updateNavButtons();
 }
 
@@ -357,34 +341,6 @@ void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
         m_fileEdit->clearEditText();
     } else {
         m_fileEdit->setCurrentText(m_model->fileName(current));
-    }
-}
-
-bool QxFileDialog::eventFilter(QObject* obj, QEvent* event)
-{
-    if (obj == m_pathEdit->lineEdit() && event->type() == QEvent::KeyPress) {
-        const auto* ke = static_cast<QKeyEvent*>(event);
-        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
-            onPathEditReturnPressed();
-            return true;  // consume — prevents QDialog default button from also firing
-        }
-    }
-    return QDialog::eventFilter(obj, event);
-}
-
-void QxFileDialog::onPathEditReturnPressed()
-{
-    const QString text = m_pathEdit->currentText().trimmed();
-    QFileInfo info(text);
-    if (info.isDir()) {
-        navigateTo(text);
-    } else {
-        // Not a directory — navigate to parent if it exists, put filename in file edit
-        QDir parent = info.dir();
-        if (parent.exists()) {
-            navigateTo(parent.canonicalPath());
-            m_fileEdit->setCurrentText(info.fileName());
-        }
     }
 }
 

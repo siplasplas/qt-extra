@@ -10,7 +10,7 @@ tab pinning, configurable tab limits, and context-sensitive close buttons.
 
 ### QxFileDialog
 Full file-system browser dialog (open/save/directory) with a tree view,
-places sidebar, navigation history, an editable path bar, and name filters.
+places sidebar, navigation history, a filesystem breadcrumb, and name filters.
 A drop-in alternative to `QFileDialog` with a custom, controllable UI.
 
 ### QxRecentDialog
