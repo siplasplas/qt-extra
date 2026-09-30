@@ -10,7 +10,7 @@ QxBreadcrumb::QxBreadcrumb(QWidget* parent)
     : QWidget(parent), m_layout(new QHBoxLayout(this))
 {
     m_layout->setContentsMargins(0, 0, 0, 0);
-    m_layout->setSpacing(1);
+    m_layout->setSpacing(0);
 }
 
 void QxBreadcrumb::setSegments(const QStringList& labels)
@@ -30,9 +30,9 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
             auto* segment = new QToolButton(this);
             segment->setText(m_segments.at(index));
             segment->setAutoRaise(true);
-            segment->setStyleSheet("QToolButton { padding: 0px 2px; }");
+            segment->setStyleSheet("QToolButton { padding: 0px 1px; }");
             // Styles (e.g. Windows) impose a minimum button width; size to the text instead
-            segment->setFixedWidth(segment->fontMetrics().horizontalAdvance(segment->text()) + 8);
+            segment->setFixedWidth(segment->fontMetrics().horizontalAdvance(segment->text()) + 4);
             connect(segment, &QToolButton::clicked, this,
                     [this, index]() { emit segmentActivated(index); });
             m_layout->addWidget(segment);
@@ -46,7 +46,7 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
         font.setBold(true);
         font.setPointSize(font.pointSize() + 3);
         arrow->setFont(font);
-        arrow->setFixedWidth(QFontMetrics(font).horizontalAdvance(arrow->text()) + 4);
+        arrow->setFixedWidth(QFontMetrics(font).horizontalAdvance(arrow->text()) + 1);
         auto* menu = new QMenu(arrow);
         connect(menu, &QMenu::aboutToShow, this, [this, index, menu]() {
             menu->clear();
