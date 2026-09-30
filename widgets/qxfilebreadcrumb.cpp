@@ -44,7 +44,7 @@ void QxFileBreadcrumb::setPath(const QString& path)
     const QString root = QDir::rootPath();
     QString current = root;
     QStringList labels{root};
-    m_segmentPaths = {root};
+    m_segmentPaths = QStringList{root};
     for (const QString& part : m_path.mid(root.size()).split('/', Qt::SkipEmptyParts)) {
         current = QDir(current).filePath(part);
         labels.append(part);

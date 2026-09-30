@@ -111,7 +111,7 @@ int main(int argc, char* argv[])
     });
 
     auto* tabSetsRow = new QHBoxLayout;
-    for (const auto& tabSet : {qMakePair(firstTabs, "Set A"), qMakePair(secondTabs, "Set B")}) {
+    for (const auto& tabSet : {qMakePair(firstTabs, QString("Set A")), qMakePair(secondTabs, QString("Set B"))}) {
         auto* setGroup = new QGroupBox(tabSet.second);
         auto* setLayout = new QVBoxLayout(setGroup);
         setLayout->addWidget(tabSet.first);
