@@ -25,7 +25,8 @@
 #include "qxfilebreadcrumb.h"
 
 static const char* fileFilter =
-    "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif)";
+    "All Files (*);;Code (*.cpp *.c *.h);;Images (*.jpg *.png *.gif);;"
+    "Audio (*.wav *.mp3 *.ogg *.oga *.opus *.flac)";
 
 int main(int argc, char* argv[])
 {
@@ -300,8 +301,10 @@ int main(int argc, char* argv[])
 
     auto* saveAsCheck = new QCheckBox("Save as");
     fileLayout->addWidget(saveAsCheck);
-    auto* audioMetadataCheck = new QCheckBox("Audio duration (WAV, MP3, Vorbis/Opus; unknown stays blank)");
-    auto* imageMetadataCheck = new QCheckBox("Image width/height (encoded pixels; depends on Qt image plugins)");
+    auto* audioMetadataCheck = new QCheckBox("Show duration");
+    audioMetadataCheck->setToolTip("Audio duration for WAV, MP3 and Vorbis/Opus; unknown stays blank.");
+    auto* imageMetadataCheck = new QCheckBox("Show size");
+    imageMetadataCheck->setToolTip("Image width and height in encoded pixels; depends on Qt image plugins.");
     fileLayout->addWidget(audioMetadataCheck);
     fileLayout->addWidget(imageMetadataCheck);
     QString browserDirectory = home;

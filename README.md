@@ -178,7 +178,10 @@ lastAudioDirectory = dialog.directory(); // Persist on cancel too.
 if (accepted) useSound(dialog.selectedFile());
 ```
 
-The demo offers separate audio/image checkboxes and remembers the last directory
+The demo window offers separate "Show duration" (audio) and "Show size" (image
+width/height) checkboxes, both off by default. These controls are outside the
+file chooser; its normal Name, Size (file bytes) and Date Modified columns stay
+visible in open/save mode. The demo remembers the last directory
 on both outcomes. Manually check header sorting, navigation, F2 rename, new
 folders, and pasted absolute/relative paths. After installing this static
 library, rebuild/relink agentdeskt and gemini-commander to use the new code;

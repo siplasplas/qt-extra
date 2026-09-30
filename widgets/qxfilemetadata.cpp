@@ -4,6 +4,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
+#include <QPersistentModelIndex>
 #include <QDateTime>
 #include <QImageReader>
 #include <QThreadPool>
@@ -275,6 +276,12 @@ public:
 }
 
 struct QxMetadataModel::State {
+    struct Node { QPersistentModelIndex source; };
+    QHash<quintptr, Node*> nodes;
+    QList<QMetaObject::Connection> connections;
+    QModelIndexList layoutIndexes;
+    QList<QPersistentModelIndex> layoutSources;
+    ~State() { qDeleteAll(nodes); }
     bool audio = false, images = false, active = false;
     QString directory;
     QHash<QString, Result> cache;
@@ -287,7 +294,7 @@ struct QxMetadataModel::State {
     QFileSystemWatcher* watcher = nullptr;
 };
 
-QxMetadataModel::QxMetadataModel(QObject* parent) : QIdentityProxyModel(parent), d(new State) {
+QxMetadataModel::QxMetadataModel(QObject* parent) : QAbstractProxyModel(parent), d(new State) {
     for (const QByteArray& format : QImageReader::supportedImageFormats())
         d->imageSuffixes.insert(QString::fromLatin1(format).toLower());
     d->timer = new QTimer(this);
@@ -309,6 +316,98 @@ QxMetadataModel::QxMetadataModel(QObject* parent) : QIdentityProxyModel(parent),
 QxMetadataModel::~QxMetadataModel() { *d->cancel = true; }
 bool QxMetadataModel::audioEnabled() const { return d->audio; }
 bool QxMetadataModel::imagesEnabled() const { return d->images; }
+void QxMetadataModel::setSourceModel(QAbstractItemModel* source) {
+    beginResetModel();
+    resetJobs();
+    for (const auto& connection : d->connections) disconnect(connection);
+    d->connections.clear();
+    qDeleteAll(d->nodes);
+    d->nodes.clear();
+    QAbstractProxyModel::setSourceModel(source);
+    if (source) {
+        auto bind = [this](QMetaObject::Connection connection) { d->connections.append(connection); };
+        bind(connect(source, &QAbstractItemModel::rowsAboutToBeInserted, this,
+            [this](const QModelIndex& parent, int first, int last) { beginInsertRows(mapFromSource(parent), first, last); }));
+        bind(connect(source, &QAbstractItemModel::rowsInserted, this, [this] { endInsertRows(); }));
+        bind(connect(source, &QAbstractItemModel::rowsAboutToBeRemoved, this,
+            [this](const QModelIndex& parent, int first, int last) { beginRemoveRows(mapFromSource(parent), first, last); }));
+        bind(connect(source, &QAbstractItemModel::rowsRemoved, this, [this] { endRemoveRows(); }));
+        bind(connect(source, &QAbstractItemModel::rowsAboutToBeMoved, this,
+            [this](const QModelIndex& from, int first, int last, const QModelIndex& to, int row) {
+                beginMoveRows(mapFromSource(from), first, last, mapFromSource(to), row);
+            }));
+        bind(connect(source, &QAbstractItemModel::rowsMoved, this, [this] { endMoveRows(); }));
+        bind(connect(source, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex& first, const QModelIndex& last, const QVector<int>& roles) {
+                emit dataChanged(mapFromSource(first), mapFromSource(last), roles);
+            }));
+        bind(connect(source, &QAbstractItemModel::headerDataChanged, this,
+            [this](Qt::Orientation orientation, int first, int last) { emit headerDataChanged(orientation, first, last); }));
+        bind(connect(source, &QAbstractItemModel::modelAboutToBeReset, this, [this] {
+            beginResetModel();
+            resetJobs();
+            qDeleteAll(d->nodes);
+            d->nodes.clear();
+        }));
+        bind(connect(source, &QAbstractItemModel::modelReset, this, [this] { endResetModel(); }));
+        bind(connect(source, &QAbstractItemModel::layoutAboutToBeChanged, this,
+            [this](const QList<QPersistentModelIndex>& parents, QAbstractItemModel::LayoutChangeHint hint) {
+                QList<QPersistentModelIndex> mapped;
+                for (const auto& parent : parents) mapped.append(mapFromSource(parent));
+                emit layoutAboutToBeChanged(mapped, hint);
+                // Header/view clients create persistent indexes in the signal above.
+                // Preserve their original columns: metadata columns share a source row,
+                // but must never collapse onto the source Name column after sorting.
+                d->layoutIndexes = persistentIndexList();
+                d->layoutSources.clear();
+                for (const auto& item : d->layoutIndexes) d->layoutSources.append(mapToSource(item));
+            }));
+        bind(connect(source, &QAbstractItemModel::layoutChanged, this,
+            [this](const QList<QPersistentModelIndex>& parents, QAbstractItemModel::LayoutChangeHint hint) {
+                QModelIndexList indexes;
+                for (int i = 0; i < d->layoutIndexes.size(); ++i) {
+                    const QModelIndex base = mapFromSource(d->layoutSources[i]);
+                    indexes.append(base.isValid() ? createIndex(base.row(), d->layoutIndexes[i].column(), base.internalPointer())
+                                                 : QModelIndex{});
+                }
+                changePersistentIndexList(d->layoutIndexes, indexes);
+                d->layoutIndexes.clear();
+                d->layoutSources.clear();
+                QList<QPersistentModelIndex> mapped;
+                for (const auto& parent : parents) mapped.append(mapFromSource(parent));
+                emit layoutChanged(mapped, hint);
+            }));
+    }
+    endResetModel();
+}
+
+QModelIndex QxMetadataModel::mapFromSource(const QModelIndex& source) const {
+    if (!source.isValid() || source.model() != sourceModel()) return {};
+    // QFileSystemModel uses one stable internal identity for each filesystem row.
+    auto*& node = d->nodes[source.internalId()];
+    if (!node) node = new State::Node;
+    node->source = source.siblingAtColumn(0);
+    return createIndex(source.row(), source.column(), node);
+}
+QModelIndex QxMetadataModel::parent(const QModelIndex& item) const {
+    return item.isValid() ? mapFromSource(mapToSource(item).parent()) : QModelIndex{};
+}
+int QxMetadataModel::rowCount(const QModelIndex& parent) const {
+    return sourceModel() && (!parent.isValid() || parent.column() == 0)
+        ? sourceModel()->rowCount(mapToSource(parent)) : 0;
+}
+bool QxMetadataModel::hasChildren(const QModelIndex& parent) const {
+    return sourceModel() && (!parent.isValid() || parent.column() == 0)
+        && sourceModel()->hasChildren(mapToSource(parent));
+}
+bool QxMetadataModel::canFetchMore(const QModelIndex& parent) const {
+    return sourceModel() && (!parent.isValid() || parent.column() == 0)
+        && sourceModel()->canFetchMore(mapToSource(parent));
+}
+void QxMetadataModel::fetchMore(const QModelIndex& parent) {
+    if (sourceModel() && (!parent.isValid() || parent.column() == 0))
+        sourceModel()->fetchMore(mapToSource(parent));
+}
 void QxMetadataModel::resetJobs() {
     *d->cancel = true;
     {
@@ -338,32 +437,36 @@ void QxMetadataModel::setDirectory(const QString& path) { d->directory = path; r
 void QxMetadataModel::setActive(bool active) { d->active = active; resetJobs(); }
 int QxMetadataModel::columnCount(const QModelIndex&) const { return 7; }
 QModelIndex QxMetadataModel::index(int row, int column, const QModelIndex& parent) const {
-    if (column < 0 || column >= 7) return {};
-    if (column < 4) return QIdentityProxyModel::index(row, column, parent);
-    const QModelIndex base = QIdentityProxyModel::index(row, 0, parent);
+    if (!sourceModel() || row < 0 || column < 0 || column >= 7 || (parent.isValid() && parent.column() != 0)) return {};
+    const QModelIndex base = mapFromSource(sourceModel()->index(row, 0, mapToSource(parent)));
     return base.isValid() ? createIndex(row, column, base.internalPointer()) : QModelIndex{};
 }
 QModelIndex QxMetadataModel::sibling(int row, int column, const QModelIndex& item) const {
     return index(row, column, item.parent());
 }
 QModelIndex QxMetadataModel::mapToSource(const QModelIndex& item) const {
-    if (item.isValid() && item.column() >= 4)
-        return QIdentityProxyModel::mapToSource(createIndex(item.row(), 0, item.internalPointer()));
-    return QIdentityProxyModel::mapToSource(item);
+    if (!item.isValid() || item.model() != this) return {};
+    const auto* node = static_cast<State::Node*>(item.internalPointer());
+    return node->source.isValid() ? QModelIndex(node->source).siblingAtColumn(item.column() < 4 ? item.column() : 0) : QModelIndex{};
 }
 Qt::ItemFlags QxMetadataModel::flags(const QModelIndex& item) const {
-    const auto base = QIdentityProxyModel::flags(item);
+    if (!sourceModel()) return Qt::NoItemFlags;
+    const auto base = sourceModel()->flags(mapToSource(item));
     return item.column() >= 4 ? base & ~Qt::ItemIsEditable : base;
+}
+bool QxMetadataModel::setData(const QModelIndex& item, const QVariant& value, int role) {
+    return sourceModel() && item.isValid() && item.column() < 4 && sourceModel()->setData(mapToSource(item), value, role);
 }
 QVariant QxMetadataModel::headerData(int section, Qt::Orientation orientation, int role) const {
     if (orientation == Qt::Horizontal && section >= 4) {
         if (role != Qt::DisplayRole) return {};
         return section == 4 ? "Duration" : section == 5 ? "Width" : "Height";
     }
-    return QIdentityProxyModel::headerData(section, orientation, role);
+    return sourceModel() ? sourceModel()->headerData(section, orientation, role) : QVariant{};
 }
 QVariant QxMetadataModel::data(const QModelIndex& item, int role) const {
-    if (item.column() < 4) return QIdentityProxyModel::data(item, role);
+    if (!item.isValid() || !sourceModel()) return {};
+    if (item.column() < 4) return sourceModel()->data(mapToSource(item), role);
     if (role == Qt::TextAlignmentRole) return int(Qt::AlignRight | Qt::AlignVCenter);
     if (role != Qt::DisplayRole && role != NumericRole) return {};
     if ((item.column() == 4 ? !d->audio : !d->images) || !d->active) return {};
