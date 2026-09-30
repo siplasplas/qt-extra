@@ -4,7 +4,6 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPushButton>
-#include <QRadioButton>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QLabel>
@@ -169,14 +168,8 @@ int main(int argc, char* argv[])
     auto* fileGroup = new QGroupBox("File");
     auto* fileLayout = new QVBoxLayout(fileGroup);
 
-    auto* modeRow = new QHBoxLayout;
-    auto* openRadio = new QRadioButton("Open");
-    auto* saveRadio = new QRadioButton("Save");
-    openRadio->setChecked(true);
-    modeRow->addWidget(openRadio);
-    modeRow->addWidget(saveRadio);
-    modeRow->addStretch();
-    fileLayout->addLayout(modeRow);
+    auto* saveAsCheck = new QCheckBox("Save as");
+    fileLayout->addWidget(saveAsCheck);
 
     auto* fileBtnRow = new QHBoxLayout;
     auto* fileNativeBtn  = new QPushButton("native");
@@ -191,7 +184,7 @@ int main(int argc, char* argv[])
     fileLayout->addLayout(fileBtnRow);
 
     QObject::connect(fileNativeBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        if (openRadio->isChecked()) {
+        if (!saveAsCheck->isChecked()) {
             log("open native", QFileDialog::getOpenFileName(&mainWindow, "Open File", home, fileFilter));
         } else {
             log("save native", QFileDialog::getSaveFileName(&mainWindow, "Save File", home, fileFilter));
@@ -199,14 +192,14 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(fileQtBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        QFileDialog dlg(&mainWindow, openRadio->isChecked() ? "Open File" : "Save File", home, fileFilter);
+        QFileDialog dlg(&mainWindow, !saveAsCheck->isChecked() ? "Open File" : "Save File", home, fileFilter);
         dlg.setOption(QFileDialog::DontUseNativeDialog, true);
-        if (openRadio->isChecked()) {
+        if (!saveAsCheck->isChecked()) {
             dlg.setFileMode(QFileDialog::ExistingFile);
         } else {
             dlg.setAcceptMode(QFileDialog::AcceptSave);
         }
-        const QString tag = openRadio->isChecked() ? "open qt" : "save qt";
+        const QString tag = !saveAsCheck->isChecked() ? "open qt" : "save qt";
         if (dlg.exec() == QDialog::Accepted)
             log(tag, dlg.selectedFiles().first());
         else
@@ -214,7 +207,7 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        if (openRadio->isChecked()) {
+        if (!saveAsCheck->isChecked()) {
             QString f = QxFileDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, fileHistory);
             addToHistory(fileHistory, f);
@@ -228,7 +221,7 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(fileRecentBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        if (openRadio->isChecked()) {
+        if (!saveAsCheck->isChecked()) {
             QString f = QxRecentDialog::getOpenFileName(
                 &mainWindow, "Open File", home, fileFilter, &fileRecent);
             log("open dialog", f);
