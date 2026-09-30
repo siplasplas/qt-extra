@@ -134,9 +134,62 @@ Full file-system browser dialog (open/save/directory) with a tree view,
 places sidebar, navigation history, a filesystem breadcrumb, and name filters.
 A drop-in alternative to `QFileDialog` with a custom, controllable UI.
 
+Since 2.1.0, `setAudioDurationVisible(true)` adds a numeric-sortable Duration
+column (`03:12.4`, rounded to tenths; minutes may exceed 59).
+`setImageDimensionsVisible(true)` independently adds numeric-sortable Width
+and Height columns. Both options default to false: disabled features do no
+metadata reads or background scans. `directory()` returns the last browsed
+directory after either acceptance or cancellation. Existing static helpers
+keep their signatures and default behavior.
+
+Audio inspection reads binary headers without decoding or launching players:
+PCM/IEEE-float RIFF WAV (including extra chunks and padding), MPEG audio frames
+(including variable bitrate MP3), and single-stream Ogg Vorbis/Opus are supported.
+MP3 and Ogg scans are limited to 128 MiB; larger files, unsupported/chained Ogg,
+compressed WAV, corrupt/truncated files and unavailable metadata stay blank.
+MP3 durations count every audio frame and validate Xing/Info or VBRI frame
+counts where present, rather than estimating from a bitrate; encoder
+delay/padding is not subtracted. Ogg Opus subtracts its pre-skip.
+Directories sort first and unknown values last in either sort direction; Size
+sorting remains numeric. Click column headers to switch sorting.
+
+Image dimensions are encoded pixel sizes, before EXIF rotation, obtained with
+`QImageReader::size()` without a full-image decode. PNG/JPEG/GIF/BMP and other
+formats depend on installed Qt handlers; unavailable dimensions stay blank.
+Only audio extensions listed above and image extensions advertised by the
+installed Qt handlers are probed; other extensions (including extensionless
+images) stay blank.
+Metadata jobs run in the background (at most two per dialog), only for requested
+rows in the current directory. Results are cached by path, size and modification
+time. Navigation, hiding the dialog or disabling a feature cancels work and
+removes metadata file watches. Enabled metadata file watches also invalidate
+results when contents change without a directory notification. Cancellation
+discards stale results; an ongoing filesystem read or image-handler size call
+may finish before noticing cancellation. Neither sorting nor painting waits
+for metadata I/O.
+
+```cpp
+QxFileDialog dialog(parent, QxFileDialog::Open);
+dialog.setDirectory(lastAudioDirectory);
+dialog.setNameFilter("Sounds (*.wav *.mp3 *.ogg *.oga *.opus)");
+dialog.setAudioDurationVisible(true);
+const bool accepted = dialog.exec() == QDialog::Accepted;
+lastAudioDirectory = dialog.directory(); // Persist on cancel too.
+if (accepted) useSound(dialog.selectedFile());
+```
+
+The demo offers separate audio/image checkboxes and remembers the last directory
+on both outcomes. Manually check header sorting, navigation, F2 rename, new
+folders, and pasted absolute/relative paths. After installing this static
+library, rebuild/relink agentdeskt and gemini-commander to use the new code;
+clients using `find_package(qt-extra 2 REQUIRED)` remain source-compatible.
+
 - Right-click a file or folder to rename it in place (also F2); right-click
   anywhere for **New > Folder**, which creates `new_folder` (or `new_folder(1)`,
   `new_folder(2)`, ...) and starts renaming it right away.
+- Drag the separators in the column header to resize any visible column,
+  including Name and the optional metadata columns. Double-click a separator
+  to fit that column to its contents.
 - The file name field accepts relative or absolute paths (`/`, and on Windows
   also `\` and `C:`). Directory parts are entered and removed from the field.
   An existing file is accepted at once; a path ending in a directory only

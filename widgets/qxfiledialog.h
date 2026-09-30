@@ -13,6 +13,8 @@ class QToolButton;
 class QModelIndex;
 class QPoint;
 class QxFileBreadcrumb;
+class QxMetadataModel;
+class QSortFilterProxyModel;
 
 class QxFileDialog : public QDialog
 {
@@ -24,6 +26,9 @@ public:
     explicit QxFileDialog(QWidget* parent = nullptr, Mode mode = Open);
 
     void    setDirectory(const QString& path);
+    QString directory() const;
+    void    setAudioDurationVisible(bool visible);
+    void    setImageDimensionsVisible(bool visible);
     void    setNameFilter(const QString& filter);
     void    setDefaultSuffix(const QString& suffix);
     void    setSizeUnit(SizeUnit unit);
@@ -49,6 +54,7 @@ public:
 
 protected:
     void showEvent(QShowEvent* event) override;
+    void hideEvent(QHideEvent* event) override;
 
 private slots:
     void onItemActivated(const QModelIndex& index);
@@ -74,6 +80,8 @@ private:
     QList<FilterEntry> parseFilter(const QString& filter);
 
     QFileSystemModel* m_model;
+    QxMetadataModel*   m_metadata;
+    QSortFilterProxyModel* m_proxy;
     QListWidget*      m_places;
     QTreeView*        m_view;
     QxFileBreadcrumb* m_breadcrumb;

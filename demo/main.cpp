@@ -300,11 +300,17 @@ int main(int argc, char* argv[])
 
     auto* saveAsCheck = new QCheckBox("Save as");
     fileLayout->addWidget(saveAsCheck);
+    auto* audioMetadataCheck = new QCheckBox("Audio duration (WAV, MP3, Vorbis/Opus; unknown stays blank)");
+    auto* imageMetadataCheck = new QCheckBox("Image width/height (encoded pixels; depends on Qt image plugins)");
+    fileLayout->addWidget(audioMetadataCheck);
+    fileLayout->addWidget(imageMetadataCheck);
+    QString browserDirectory = home;
 
     auto* fileBtnRow = new QHBoxLayout;
     auto* fileNativeBtn  = new QPushButton("native");
     auto* fileQtBtn      = new QPushButton("Qt");
     auto* fileDialogBtn = new QPushButton("custom");
+    fileDialogBtn->setToolTip("Drag column header separators to resize; double-click to fit contents.");
     auto* fileRecentBtn  = new QPushButton("recent files");
     fileBtnRow->addWidget(fileNativeBtn);
     fileBtnRow->addWidget(fileQtBtn);
@@ -337,17 +343,18 @@ int main(int argc, char* argv[])
     });
 
     QObject::connect(fileDialogBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {
-        if (!saveAsCheck->isChecked()) {
-            QString f = QxFileDialog::getOpenFileName(
-                &mainWindow, "Open File", home, fileFilter, fileHistory);
-            addToHistory(fileHistory, f);
-            log("open browser", f);
-        } else {
-            QString f = QxFileDialog::getSaveFileName(
-                &mainWindow, "Save File", home, fileFilter, "untitled.txt", fileHistory);
-            addToHistory(fileHistory, f);
-            log("save browser", f);
-        }
+        QxFileDialog dlg(&mainWindow, saveAsCheck->isChecked() ? QxFileDialog::Save : QxFileDialog::Open);
+        dlg.setDirectory(browserDirectory);
+        dlg.setNameFilter(fileFilter);
+        dlg.setHistory(fileHistory);
+        dlg.setAudioDurationVisible(audioMetadataCheck->isChecked());
+        dlg.setImageDimensionsVisible(imageMetadataCheck->isChecked());
+        if (saveAsCheck->isChecked()) dlg.setFileName("untitled.txt");
+        const QString file = dlg.exec() == QDialog::Accepted ? dlg.selectedFile() : QString{};
+        browserDirectory = dlg.directory();
+        addToHistory(fileHistory, file);
+        log(saveAsCheck->isChecked() ? "save browser" : "open browser", file);
+        log("last browser directory", browserDirectory);
     });
 
     QObject::connect(fileRecentBtn, &QPushButton::clicked, [&, &mainWindow = mainWindow]() {

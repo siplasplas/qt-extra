@@ -1,5 +1,6 @@
 #include "qxfiledialog.h"
 #include "qxfilebreadcrumb.h"
+#include "qxfilemetadata.h"
 
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -91,6 +92,16 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     m_model->setFilter(mode == Directory
         ? QDir::Dirs  | QDir::NoDotAndDotDot
         : QDir::AllEntries | QDir::AllDirs | QDir::NoDotAndDotDot);
+    m_metadata = new QxMetadataModel(this);
+    m_metadata->setSourceModel(m_model);
+    m_proxy = new QxMetadataSortModel(this);
+    m_proxy->setSourceModel(m_metadata);
+    connect(m_model, &QAbstractItemModel::dataChanged, this,
+            [this](const QModelIndex& first, const QModelIndex& last) {
+                const QModelIndex a = m_metadata->mapFromSource(first).siblingAtColumn(4);
+                const QModelIndex b = m_metadata->mapFromSource(last).siblingAtColumn(6);
+                emit m_metadata->dataChanged(a, b);
+            });
 
     // Places panel (left)
     m_places = new QListWidget;
@@ -130,15 +141,25 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
 
     // File tree view (multi-column)
     m_view = new QTreeView;
-    m_view->setModel(m_model);
+    m_view->setModel(m_proxy);
     m_view->setRootIsDecorated(false);
     m_view->setSortingEnabled(true);
     m_view->sortByColumn(0, Qt::AscendingOrder);
     m_view->setColumnHidden(1, mode == Directory); // hide Size in dir mode
     m_view->setColumnHidden(2, true);              // hide "Type" column
-    m_view->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-    m_view->header()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_view->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    for (int column = 4; column <= 6; ++column) {
+        m_view->setColumnHidden(column, true);
+    }
+    auto* header = m_view->header();
+    header->setStretchLastSection(false);
+    header->setSectionResizeMode(QHeaderView::Interactive);
+    header->resizeSection(0, 280);
+    const QString samples[] = {"999.9 MiB", "", "yyyy-MM-dd HH:mm", "999:59.9", "99999", "99999"};
+    for (int column = 1; column <= 6; ++column) {
+        const QString title = m_proxy->headerData(column, Qt::Horizontal).toString();
+        header->resizeSection(column, qMax(header->fontMetrics().horizontalAdvance(title),
+                                          header->fontMetrics().horizontalAdvance(samples[column - 1])) + 32);
+    }
     m_view->setSelectionBehavior(QAbstractItemView::SelectRows);
     m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_view->setEditTriggers(QAbstractItemView::EditKeyPressed);  // F2; double-click still activates
@@ -234,6 +255,28 @@ void QxFileDialog::setDirectory(const QString& path)
     navigateTo(path);
 }
 
+QString QxFileDialog::directory() const
+{
+    return m_currentPath;
+}
+
+void QxFileDialog::setAudioDurationVisible(bool visible)
+{
+    m_metadata->setFeatures(visible, m_metadata->imagesEnabled());
+    if (!visible && m_view->header()->sortIndicatorSection() == 4)
+        m_view->sortByColumn(0, Qt::AscendingOrder);
+    m_view->setColumnHidden(4, !visible);
+}
+
+void QxFileDialog::setImageDimensionsVisible(bool visible)
+{
+    m_metadata->setFeatures(m_metadata->audioEnabled(), visible);
+    if (!visible && m_view->header()->sortIndicatorSection() >= 5)
+        m_view->sortByColumn(0, Qt::AscendingOrder);
+    m_view->setColumnHidden(5, !visible);
+    m_view->setColumnHidden(6, !visible);
+}
+
 void QxFileDialog::setNameFilter(const QString& filter)
 {
     m_filters = parseFilter(filter);
@@ -258,6 +301,7 @@ void QxFileDialog::setSizeUnit(SizeUnit unit)
 void QxFileDialog::setFileName(const QString& name)
 {
     m_fileEdit->setCurrentText(name);
+    m_nameFromSelection = false;
 }
 
 void QxFileDialog::setHistory(const QStringList& paths)
@@ -289,10 +333,17 @@ QString QxFileDialog::selectedFile() const
 void QxFileDialog::showEvent(QShowEvent* event)
 {
     QDialog::showEvent(event);
+    m_metadata->setActive(true);
     if (m_mode == Save && !m_fileEdit->currentText().isEmpty()) {
         m_fileEdit->setFocus();
         m_fileEdit->lineEdit()->selectAll();
     }
+}
+
+void QxFileDialog::hideEvent(QHideEvent* event)
+{
+    m_metadata->setActive(false);
+    QDialog::hideEvent(event);
 }
 
 void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
@@ -309,9 +360,10 @@ void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
     }
 
     m_currentPath = canonical;
+    m_metadata->setDirectory(canonical);
     if (m_breadcrumb->path() != canonical)
         m_breadcrumb->setPath(canonical);
-    m_view->setRootIndex(m_model->index(canonical));
+    m_view->setRootIndex(m_proxy->mapFromSource(m_metadata->mapFromSource(m_model->index(canonical))));
     m_view->clearSelection();
     if (m_mode != Save) m_fileEdit->clearEditText();
     updateNavButtons();
@@ -359,10 +411,12 @@ void QxFileDialog::applyCurrentFilter()
 
 void QxFileDialog::onItemActivated(const QModelIndex& index)
 {
-    if (m_model->isDir(index)) {
-        navigateTo(m_model->filePath(index));
+    const QModelIndex source = m_metadata->mapToSource(m_proxy->mapToSource(index));
+    if (m_model->isDir(source)) {
+        navigateTo(m_model->filePath(source));
     } else {
-        m_fileEdit->setCurrentText(m_model->fileName(index));
+        m_fileEdit->setCurrentText(m_model->fileName(source));
+        m_nameFromSelection = true;
         tryAccept();
     }
 }
@@ -370,12 +424,13 @@ void QxFileDialog::onItemActivated(const QModelIndex& index)
 void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
 {
     if (!current.isValid()) return;
+    const QModelIndex source = m_metadata->mapToSource(m_proxy->mapToSource(current));
     if (m_mode == Directory) {
-        m_fileEdit->setCurrentText(m_model->fileName(current));
-    } else if (m_model->isDir(current)) {
+        m_fileEdit->setCurrentText(m_model->fileName(source));
+    } else if (m_model->isDir(source)) {
         m_fileEdit->clearEditText();
     } else {
-        m_fileEdit->setCurrentText(m_model->fileName(current));
+        m_fileEdit->setCurrentText(m_model->fileName(source));
     }
     m_nameFromSelection = true;
 }
@@ -412,9 +467,10 @@ void QxFileDialog::createFolder()
         return;
     }
     // Let the user choose the real name right away
-    m_view->setCurrentIndex(index);
-    m_view->scrollTo(index);
-    m_view->edit(index);
+    const QModelIndex viewIndex = m_proxy->mapFromSource(m_metadata->mapFromSource(index));
+    m_view->setCurrentIndex(viewIndex);
+    m_view->scrollTo(viewIndex);
+    m_view->edit(viewIndex);
 }
 
 void QxFileDialog::onFilterChanged(int /*index*/)
