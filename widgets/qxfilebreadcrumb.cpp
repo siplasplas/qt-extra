@@ -43,8 +43,8 @@ QxFileBreadcrumb::QxFileBreadcrumb(QWidget* parent)
     });
     connect(m_breadcrumb, &QxBreadcrumb::menuRequested, this, [this](int index, QMenu* menu) {
         if (index < 0 || index >= m_segmentPaths.size()) return;
-        if (kWindowsPaths && index == 0) {
-            // First segment on Windows: switch between drives
+        if (m_segmentPaths.at(index).isEmpty()) {
+            // Leading arrow on Windows: switch between drives
             for (const QFileInfo& drive : QDir::drives()) {
                 const QString drivePath = drive.absoluteFilePath();
                 menu->addAction(QDir::toNativeSeparators(drivePath), this, [this, drivePath]() {
@@ -77,8 +77,15 @@ void QxFileBreadcrumb::setPath(const QString& path)
 
     const QString root = rootOf(m_path);
     QString current = root;
-    QStringList labels{QDir::toNativeSeparators(root)};
-    m_segmentPaths = QStringList{root};
+    QStringList labels;
+    m_segmentPaths.clear();
+    if (kWindowsPaths) {
+        // Arrow-only segment before the drive, listing all drives
+        labels.append(QString());
+        m_segmentPaths.append(QString());
+    }
+    labels.append(QDir::toNativeSeparators(root));
+    m_segmentPaths.append(root);
     for (const QString& part : m_path.mid(root.size()).split('/', Qt::SkipEmptyParts)) {
         current = QDir(current).filePath(part);
         labels.append(part);

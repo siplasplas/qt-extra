@@ -24,13 +24,16 @@ void QxBreadcrumb::setSegments(const QStringList& labels)
     }
 
     for (int index = 0; index < m_segments.size(); ++index) {
-        auto* segment = new QToolButton(this);
-        segment->setText(m_segments.at(index));
-        segment->setAutoRaise(true);
-        segment->setStyleSheet("QToolButton { padding: 0px 2px; }");
-        connect(segment, &QToolButton::clicked, this,
-                [this, index]() { emit segmentActivated(index); });
-        m_layout->addWidget(segment);
+        // An empty label leaves only the arrow (e.g. a leading menu of roots)
+        if (!m_segments.at(index).isEmpty()) {
+            auto* segment = new QToolButton(this);
+            segment->setText(m_segments.at(index));
+            segment->setAutoRaise(true);
+            segment->setStyleSheet("QToolButton { padding: 0px 2px; }");
+            connect(segment, &QToolButton::clicked, this,
+                    [this, index]() { emit segmentActivated(index); });
+            m_layout->addWidget(segment);
+        }
 
         auto* arrow = new QToolButton(this);
         arrow->setText(QStringLiteral(">"));

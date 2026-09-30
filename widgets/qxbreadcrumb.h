@@ -13,6 +13,7 @@ class QxBreadcrumb : public QWidget
 public:
     explicit QxBreadcrumb(QWidget* parent = nullptr);
 
+    /** Each label gets a button and a menu arrow; an empty label gets only the arrow. */
     void setSegments(const QStringList& labels);
     QStringList segments() const { return m_segments; }
 
