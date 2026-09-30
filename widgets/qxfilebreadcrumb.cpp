@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QMenu>
+#include <QStorageInfo>
 
 namespace {
 
@@ -47,10 +48,16 @@ QxFileBreadcrumb::QxFileBreadcrumb(QWidget* parent)
             // Leading arrow on Windows: switch between drives
             for (const QFileInfo& drive : QDir::drives()) {
                 const QString drivePath = drive.absoluteFilePath();
-                menu->addAction(QDir::toNativeSeparators(drivePath), this, [this, drivePath]() {
+                // Drives without media (e.g. an empty optical drive) are listed but disabled
+                const bool ready = QStorageInfo(drivePath).isReady();
+                QString label = QDir::toNativeSeparators(drivePath);
+                if (!ready)
+                    label += tr(" (no media)");
+                QAction* action = menu->addAction(label, this, [this, drivePath]() {
                     setPath(drivePath);
                     emit pathActivated(m_path);
                 });
+                action->setEnabled(ready);
             }
             return;
         }
