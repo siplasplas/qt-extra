@@ -343,7 +343,9 @@ int main(int argc, char* argv[])
     auto* fileNativeBtn  = new QPushButton("native");
     auto* fileQtBtn      = new QPushButton("Qt");
     auto* fileDialogBtn = new QPushButton("custom");
-    fileDialogBtn->setToolTip("Drag column header separators to resize; double-click to fit contents.");
+    fileDialogBtn->setToolTip("Drag column header separators to resize; double-click to fit contents.\n"
+                              "Typing a name quick-searches the list (substring); Up/Down jump between "
+                              "matches, Right/Tab complete the name.");
     auto* fileRecentBtn  = new QPushButton("recent files");
     fileBtnRow->addWidget(fileNativeBtn);
     fileBtnRow->addWidget(fileQtBtn);

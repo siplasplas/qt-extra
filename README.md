@@ -208,7 +208,7 @@ on both outcomes. Its default-file field accepts a name or a relative/absolute f
 "Use last selected" fills it from the last accepted file. "Select multiple files
 (Open only)" applies to custom, native and Qt choosers; Save stays single-file.
 Directory choosers have a separate default-directory field.
-Manually check header sorting, navigation, F2 rename, new
+Manually check header sorting, navigation, quick search, F2 rename, new
 folders, and pasted absolute/relative paths. After installing this static
 library, rebuild/relink agentdeskt and gemini-commander to use the new code;
 clients using `find_package(qt-extra 2 REQUIRED)` remain source-compatible.
@@ -216,6 +216,20 @@ clients using `find_package(qt-extra 2 REQUIRED)` remain source-compatible.
 - Right-click a file or folder to rename it in place (also F2); right-click
   anywhere for **New > Folder**, which creates `new_folder` (or `new_folder(1)`,
   `new_folder(2)`, ...) and starts renaming it right away.
+- Quick search (since 2.3.0): the file name field has the focus when the
+  dialog opens. Typing a plain name there (no directory separator) moves the
+  selection to the nearest file or folder whose name contains the text anywhere
+  (case-insensitive, ignoring diacritics); while nothing matches you can keep
+  typing and the selection stays put. The typed text is not replaced.
+  Down/PageDown and Up/PageUp jump to the next/previous match, wrapping around;
+  without a search they move through the list. Right (at the end of the text)
+  or Tab completes the text to the matched name. Enter accepts as usual; if the
+  typed text is not itself an existing entry, Open and Directory modes open the
+  matched item instead (Save keeps the typed name). Text containing a
+  separator is a path again: Enter enters its directories first and strips
+  them from the field. Escape cancels the dialog. A letter or digit typed in
+  the list starts a new name in the field. This replaces the list's built-in
+  prefix type-ahead.
 - Drag the separators in the column header to resize any visible column,
   including Name and the optional metadata columns. Double-click a separator
   to fit that column to its contents.

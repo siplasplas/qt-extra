@@ -63,6 +63,7 @@ public:
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
 private slots:
     void onItemActivated(const QModelIndex& index);
@@ -83,6 +84,10 @@ private:
     void scheduleFileSelection();
     void selectPendingFile();
     void updateSelectionName();
+    QString quickSearchText() const;
+    bool currentMatchesQuickSearch() const;
+    bool moveToQuickMatch(int step);
+    bool completeQuickSearch();
 
     struct FilterEntry {
         QString     display;
@@ -111,6 +116,7 @@ private:
     bool        m_nameFromSelection = false;  // file edit filled from the view, not typed
     bool        m_multipleSelection = false;
     bool        m_selectionScheduled = false;
+    bool        m_quickSearching = false;     // selection moved by quick search; keep typed text
     QString     m_pendingFile;
     QSet<QString> m_loadedDirectories;
     QList<FilterEntry> m_filters;

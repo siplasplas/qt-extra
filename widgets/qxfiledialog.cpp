@@ -27,6 +27,8 @@
 #include <QStorageInfo>
 #include <QTimer>
 #include <QSignalBlocker>
+#include <QKeyEvent>
+#include <QCoreApplication>
 
 #include <algorithm>
 
@@ -239,7 +241,17 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
         const QSignalBlocker blocker(m_view->selectionModel());
         m_view->clearSelection();
     };
-    connect(m_fileEdit->lineEdit(), &QLineEdit::textEdited, this, typedName);
+    // Typing a name (no directory separator) quick-searches the list: the selection
+    // moves to the nearest name containing the text, or stays put without a match
+    connect(m_fileEdit->lineEdit(), &QLineEdit::textEdited, this, [this, typedName] {
+        if (quickSearchText().isEmpty()) {
+            typedName();
+            return;
+        }
+        m_pendingFile.clear();
+        m_nameFromSelection = false;
+        moveToQuickMatch(0);
+    });
     connect(m_fileEdit, QOverload<int>::of(&QComboBox::activated), this, typedName);
     connect(m_view, &QTreeView::activated, this, &QxFileDialog::onItemActivated);
     connect(m_view, &QTreeView::customContextMenuRequested,
@@ -250,7 +262,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
             });
     connect(m_view->selectionModel(), &QItemSelectionModel::selectionChanged,
             this, [this] {
-                if (m_multipleSelection) updateSelectionName();
+                if (m_multipleSelection && !m_quickSearching) updateSelectionName();
             });
     connect(m_proxy, &QAbstractItemModel::rowsInserted, this, [this] { scheduleFileSelection(); });
     connect(m_proxy, &QAbstractItemModel::layoutChanged, this, [this] { scheduleFileSelection(); });
@@ -263,6 +275,9 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
     // Enter in the file edit reaches tryAccept() through the default button only
     connect(m_acceptBtn, &QPushButton::clicked, this, [this]{ tryAccept(); });
     connect(cancelBtn,   &QPushButton::clicked, this, &QDialog::reject);
+    m_view->installEventFilter(this);
+    m_fileEdit->installEventFilter(this);              // has the focus; forwards text keys
+    m_fileEdit->lineEdit()->installEventFilter(this);
 
     setNameFilter("All Files (*)");
     navigateTo(QDir::currentPath());
@@ -456,10 +471,10 @@ void QxFileDialog::showEvent(QShowEvent* event)
     QDialog::showEvent(event);
     m_metadata->setActive(true);
     scheduleFileSelection();
-    if (m_mode == Save && !m_fileEdit->currentText().isEmpty()) {
-        m_fileEdit->setFocus();
+    // Typing goes to the name field right away (and quick-searches the list)
+    m_fileEdit->setFocus();
+    if (m_mode == Save && !m_fileEdit->currentText().isEmpty())
         m_fileEdit->lineEdit()->selectAll();
-    }
 }
 
 void QxFileDialog::hideEvent(QHideEvent* event)
@@ -467,6 +482,132 @@ void QxFileDialog::hideEvent(QHideEvent* event)
     m_metadata->setActive(false);
     m_pendingFile.clear();
     QDialog::hideEvent(event);
+}
+
+bool QxFileDialog::eventFilter(QObject* watched, QEvent* event)
+{
+    if (event->type() != QEvent::KeyPress)
+        return QDialog::eventFilter(watched, event);
+    auto* key = static_cast<QKeyEvent*>(event);
+    QLineEdit* edit = m_fileEdit->lineEdit();
+
+    if (watched == m_view) {
+        // A letter or digit typed in the list starts a new name in the name field
+        const QString text = key->text();
+        const Qt::KeyboardModifiers mods = key->modifiers()
+            & ~(Qt::ShiftModifier | Qt::KeypadModifier | Qt::GroupSwitchModifier);
+        if (mods == Qt::NoModifier && text.size() == 1 && text[0].isLetterOrNumber()) {
+            m_fileEdit->setFocus();
+            edit->selectAll();
+            QKeyEvent copy(key->type(), key->key(), key->modifiers(), text);
+            QCoreApplication::sendEvent(m_fileEdit, &copy);
+            return true;
+        }
+    } else if (watched == m_fileEdit || watched == edit) {
+        const bool searching = !m_nameFromSelection && !quickSearchText().isEmpty();
+        switch (key->key()) {
+        case Qt::Key_Down:
+        case Qt::Key_PageDown:
+        case Qt::Key_Up:
+        case Qt::Key_PageUp:
+            if (key->modifiers() & (Qt::AltModifier | Qt::ControlModifier))
+                break;  // Alt+Down still opens the history
+            if (searching) {
+                const bool down = key->key() == Qt::Key_Down || key->key() == Qt::Key_PageDown;
+                moveToQuickMatch(down ? 1 : -1);
+            } else {
+                // Without a search the keys move through the list, focus stays here
+                QKeyEvent copy(key->type(), key->key(), key->modifiers(), key->text());
+                QCoreApplication::sendEvent(m_view, &copy);
+            }
+            return true;
+        case Qt::Key_Right:
+            if (key->modifiers() == Qt::NoModifier && !edit->hasSelectedText()
+                && edit->cursorPosition() == edit->text().size() && completeQuickSearch())
+                return true;
+            break;
+        case Qt::Key_Tab:
+            if (key->modifiers() == Qt::NoModifier && completeQuickSearch())
+                return true;
+            break;
+        default:
+            break;
+        }
+    }
+    return QDialog::eventFilter(watched, event);
+}
+
+// Typed text usable as a quick search: a plain name, not a path
+QString QxFileDialog::quickSearchText() const
+{
+    const QString text = m_fileEdit->currentText().trimmed();
+#ifdef Q_OS_WIN
+    if (text.contains('\\') || text.contains(':')) return {};
+#endif
+    return text.contains('/') ? QString{} : text;
+}
+
+// Case-insensitive key that ignores diacritics ("Łódź" matches "lodz")
+static QString quickSearchKey(const QString& text)
+{
+    const QString decomposed = text.normalized(QString::NormalizationForm_D);
+    QString key;
+    key.reserve(decomposed.size());
+    for (QChar c : decomposed) {
+        if (c.category() == QChar::Mark_NonSpacing) continue;
+        if (c == QChar(0x0141) || c == QChar(0x0142)) c = QLatin1Char('l');  // Ł, ł
+        key += c;
+    }
+    return key.toCaseFolded();
+}
+
+bool QxFileDialog::currentMatchesQuickSearch() const
+{
+    const QString needle = quickSearchKey(quickSearchText());
+    const QModelIndex current = m_view->currentIndex();
+    return !needle.isEmpty() && current.isValid() && current.parent() == m_view->rootIndex()
+        && m_view->selectionModel()->isSelected(current)
+        && quickSearchKey(current.siblingAtColumn(0).data().toString()).contains(needle);
+}
+
+// Selects the nearest item whose name contains the typed text: from the current
+// item inclusive (step 0), or the next (1) / previous (-1) one, wrapping around.
+// Without a match the selection stays where it is. The typed text is kept.
+bool QxFileDialog::moveToQuickMatch(int step)
+{
+    const QString needle = quickSearchKey(quickSearchText());
+    if (needle.isEmpty()) return false;
+    const QModelIndex root = m_view->rootIndex();
+    const int rows = m_proxy->rowCount(root);
+    if (rows == 0) return false;
+
+    const QModelIndex current = m_view->currentIndex();
+    const bool hasCurrent = current.isValid() && current.parent() == root;
+    int base = hasCurrent ? current.row() : 0;
+    if (!hasCurrent && step != 0) base = step > 0 ? -1 : rows;
+    for (int i = 0; i < rows; ++i) {
+        const int offset = step == 0 ? i : (i + 1) * (step > 0 ? 1 : -1);
+        const int row = ((base + offset) % rows + rows) % rows;
+        const QModelIndex index = m_proxy->index(row, 0, root);
+        if (!quickSearchKey(index.data().toString()).contains(needle)) continue;
+        m_quickSearching = true;
+        m_view->selectionModel()->setCurrentIndex(index, QItemSelectionModel::ClearAndSelect | QItemSelectionModel::Rows);
+        m_quickSearching = false;
+        m_view->scrollTo(index);
+        return true;
+    }
+    return false;
+}
+
+// Right/Tab: completes the typed text to the name of the matched item
+bool QxFileDialog::completeQuickSearch()
+{
+    if (m_nameFromSelection || !currentMatchesQuickSearch()) return false;
+    const QString name = m_view->currentIndex().siblingAtColumn(0).data().toString();
+    if (m_fileEdit->currentText() == name) return false;
+    m_fileEdit->setCurrentText(name);
+    m_nameFromSelection = false;  // resolved like a typed name: a directory is entered on accept
+    return true;
 }
 
 void QxFileDialog::navigateTo(const QString& path, bool pushToHistory)
@@ -551,7 +692,7 @@ void QxFileDialog::onItemActivated(const QModelIndex& index)
 
 void QxFileDialog::onCurrentItemChanged(const QModelIndex& current)
 {
-    if (!current.isValid()) return;
+    if (!current.isValid() || m_quickSearching) return;
     m_pendingFile.clear();
     if (m_multipleSelection) {
         updateSelectionName();
@@ -682,6 +823,13 @@ bool QxFileDialog::tryAccept()
             if (!QFileInfo(file).isFile()) return false;
         accept();
         return true;
+    }
+    // A partial name that is not an entry itself opens the item quick search
+    // matched (Save keeps the typed name: it may be a new file)
+    if (!m_nameFromSelection && m_mode != Save && currentMatchesQuickSearch()
+        && !QFileInfo::exists(QDir(m_currentPath).filePath(quickSearchText()))) {
+        onItemActivated(m_view->currentIndex());
+        return result() == QDialog::Accepted;
     }
     // Directories (and unresolvable paths) only navigate; a file accepts at once
     if (!m_nameFromSelection && consumeTypedPath()) return false;
