@@ -238,8 +238,7 @@ QxFileDialog::QxFileDialog(QWidget* parent, Mode mode)
         m_pendingFile.clear();
         m_nameFromSelection = false;
         // A typed path supersedes any multiple selection without changing the text.
-        const QSignalBlocker blocker(m_view->selectionModel());
-        m_view->clearSelection();
+        clearSelectionQuietly();
     };
     // Typing a name (no directory separator) quick-searches the list: the selection
     // moves to the nearest name containing the text, or stays put without a match
@@ -334,10 +333,7 @@ void QxFileDialog::setSizeUnit(SizeUnit unit)
 void QxFileDialog::setFileName(const QString& name)
 {
     m_pendingFile.clear();
-    {
-        const QSignalBlocker blocker(m_view->selectionModel());
-        m_view->clearSelection();
-    }
+    clearSelectionQuietly();
     m_fileEdit->setCurrentText(name);
     m_nameFromSelection = false;
     if (name.isEmpty()) return;
@@ -429,8 +425,19 @@ void QxFileDialog::setHistory(const QStringList& paths)
     m_fileEdit->blockSignals(false);
     m_pendingFile.clear();
     m_nameFromSelection = false;
-    const QSignalBlocker blocker(m_view->selectionModel());
-    m_view->clearSelection();
+    clearSelectionQuietly();
+}
+
+// Clears the view selection without touching the name field. The blocked
+// selection signals also skip the view's repaint, so repaint it here; otherwise
+// the old row stays highlighted outside the name column.
+void QxFileDialog::clearSelectionQuietly()
+{
+    {
+        const QSignalBlocker blocker(m_view->selectionModel());
+        m_view->clearSelection();
+    }
+    m_view->viewport()->update();
 }
 
 void QxFileDialog::setDefaultSuffix(const QString& suffix)

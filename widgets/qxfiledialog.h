@@ -84,6 +84,7 @@ private:
     void scheduleFileSelection();
     void selectPendingFile();
     void updateSelectionName();
+    void clearSelectionQuietly();
     QString quickSearchText() const;
     bool currentMatchesQuickSearch() const;
     bool moveToQuickMatch(int step);
