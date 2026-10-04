@@ -107,7 +107,7 @@ void QxRecentDialog::onRecentItemDoubleClicked(QListWidgetItem* item)
 
 void QxRecentDialog::onAccept()
 {
-    QString path = m_pathEdit->text().trimmed();
+    QString path = QxFileDialog::expandHomePath(m_pathEdit->text().trimmed());
     if (path.isEmpty()) return;
     if (m_mode == Open && !QFileInfo::exists(path)) return;
     if (m_mode == Directory && !QDir(path).exists()) return;

@@ -445,10 +445,23 @@ void QxFileDialog::setDefaultSuffix(const QString& suffix)
     m_defaultSuffix = suffix;
 }
 
+QString QxFileDialog::expandHomePath(const QString& path)
+{
+    if (!path.startsWith(QLatin1Char('~'))) return path;
+    if (path.size() == 1) return QDir::homePath();
+    const QChar next = path.at(1);
+#ifdef Q_OS_WIN
+    if (next != QLatin1Char('/') && next != QLatin1Char('\\')) return path;
+#else
+    if (next != QLatin1Char('/')) return path;
+#endif
+    return QDir::homePath() + path.mid(1);
+}
+
 QString QxFileDialog::selectedFile() const
 {
     if (m_multipleSelection && m_nameFromSelection) return selectedFiles().value(0);
-    QString name = m_fileEdit->currentText().trimmed();
+    QString name = expandHomePath(m_fileEdit->currentText().trimmed());
     if (name.isEmpty())
         return m_mode == Directory ? m_currentPath : QString{};
     if (QFileInfo(name).isAbsolute()) return name;
@@ -544,10 +557,10 @@ bool QxFileDialog::eventFilter(QObject* watched, QEvent* event)
     return QDialog::eventFilter(watched, event);
 }
 
-// Typed text usable as a quick search: a plain name, not a path
+// Typed text usable as a quick search: a plain name, not a path ("~" is the home directory)
 QString QxFileDialog::quickSearchText() const
 {
-    const QString text = m_fileEdit->currentText().trimmed();
+    const QString text = expandHomePath(m_fileEdit->currentText().trimmed());
 #ifdef Q_OS_WIN
     if (text.contains('\\') || text.contains(':')) return {};
 #endif
@@ -761,7 +774,8 @@ void QxFileDialog::onFilterChanged(int /*index*/)
 
 bool QxFileDialog::consumeTypedPath()
 {
-    const QString text = m_fileEdit->currentText().trimmed();
+    // "~" reads as the home directory's path typed in its place
+    const QString text = expandHomePath(m_fileEdit->currentText().trimmed());
 #ifdef Q_OS_WIN
     auto isSep = [](QChar c) { return c == '/' || c == '\\'; };
     const bool hasDrive = text.size() >= 2 && text[1] == ':' && text[0].isLetter();

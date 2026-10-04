@@ -238,11 +238,19 @@ clients using `find_package(qt-extra 2 REQUIRED)` remain source-compatible.
   An existing file is accepted at once; a path ending in a directory only
   navigates there, so a second Enter chooses it. A name filled in by selecting
   an item in the list is accepted as is.
+- A leading `~`, alone or before a separator, is the home directory, as in a
+  shell: `~` reads as if `QDir::homePath()` had been typed (on Linux
+  `/home/<user>`, on Windows the user's profile directory), and `~/src/app` as
+  that path followed by `/src/app`. So `~` and Enter go to the home directory.
+  `~user` and a tilde inside a name are not changed; a file named `~` in the
+  current directory is reached as `./~`. `QxFileDialog::expandHomePath()` does
+  the replacement and is public for other path fields.
 
 ### QxRecentDialog
 Lightweight file open/save and directory selection dialog with a built-in
 recently-used paths list. The caller owns and persists the list — pass it in,
 get the updated list back. Keep separate lists for files and directories.
+A typed path may start with `~` for the home directory, as in `QxFileDialog`.
 
 ### QxBreadcrumb
 General breadcrumb driven by caller-supplied segments. It emits signals when a

@@ -60,6 +60,11 @@ public:
                                         const QString& dir,
                                         const QStringList& history = {});
 
+    // A leading "~", alone or before a directory separator, stands for the home directory, as in a
+    // shell: "~/src" gives QDir::homePath() + "/src". Other text, "~user" and a tilde inside a name
+    // are returned unchanged. The dialogs read typed paths through it.
+    static QString expandHomePath(const QString& path);
+
 protected:
     void showEvent(QShowEvent* event) override;
     void hideEvent(QHideEvent* event) override;
