@@ -5,6 +5,7 @@
 #include <QTabBar>
 #include <QList>
 #include <QHash>
+#include <QSet>
 #include <QTimer>
 #include <QPointer>
 #include <QMap>
@@ -35,7 +36,23 @@ class QAbstractButton;
 class MruTabWidget : public QTabWidget
 {
     Q_OBJECT
+public:
+    /// @brief What happens to a tab that has to make room for a new one; see makeRoomForNewTab().
+    enum class LimitAction {
+        Close,  ///< Close the tab (tabAboutToClose is still asked, with askPin = true)
+        Keep,   ///< Keep the tab open and pin it, so it no longer counts toward the limit
+        Cancel  ///< Close nothing more; the new tab must not be added
+    };
+    Q_ENUM(LimitAction)
+
 signals:
+    /**
+     * @brief Emitted by makeRoomForNewTab() for a tab that must give way to a new tab.
+     *
+     * @p action is Close when the receiver leaves it unchanged. Receivers must use a direct
+     * connection, because @p action is read right after emission.
+     */
+    void tabLimitReached(QWidget *page, MruTabWidget::LimitAction &action);
     /**
      * @brief Emitted before a tab is closed; set @p allow to false to keep the tab.
      *
@@ -111,6 +128,17 @@ public:
      * @return number of closed tabs
      */
     int enforceTabLimit();
+
+    /**
+     * @brief Makes room for one more unpinned tab; call it before adding the tab.
+     * @return false when the new tab must not be added
+     *
+     * While the limit would be exceeded, emits tabLimitReached for the least recently used
+     * unpinned tab and closes or pins it as the receiver decides. Returns false when a
+     * receiver chose Cancel, when a close was vetoed in tabAboutToClose (the vetoed tab is
+     * not pinned) or while another tab limit question is still open.
+     */
+    bool makeRoomForNewTab();
 
     /**
      * @brief Sets pin state for a tab
@@ -241,6 +269,7 @@ private:
 
     QVector<QWidget*> findLeastRecentlyUsedUnpinnedTabs(int atMost) const;
     int limitedTabCount() const;
+    void finishLimitCheck();
 
 
     // --- Member Variables ---
@@ -267,6 +296,13 @@ private:
     QMap<int, QPointer<QAbstractButton>> m_tabIndexToCloseButtonMap;
 
     int m_tabLimit = 0;
+    // Set while the tab limit is being enforced. A question to the user (e.g. a message box)
+    // runs a nested event loop, in which the deferred check after a tab insertion would
+    // otherwise ask about the same tab a second time.
+    bool m_limitBusy = false;
+    bool m_limitCheckPending = false;
+    // Pages whose tabAboutToClose is being answered
+    QSet<QWidget*> m_closeQuestions;
     int m_minimalTabCount = 0;
     bool m_sequentialTabSwitching = false;
 };

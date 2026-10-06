@@ -47,6 +47,15 @@ each one still asks `tabAboutToClose`.
   called directly and returns how many tabs it closed.
 - These closes emit `tabAboutToClose` with `askPin = true`. A receiver that vetoes such a
   close (e.g. the user answered "keep it") gets the tab pinned instead.
+- To ask *before* a tab is added, call `makeRoomForNewTab()` first and add the tab only
+  when it returns true (since 2.5). For each least recently used unpinned tab that has
+  to give way it emits `tabLimitReached(page, action)`; the receiver sets `action` to
+  `LimitAction::Close` (default; `tabAboutToClose` is still emitted with `askPin = true`),
+  `Keep` (the tab is pinned and the new tab is added) or `Cancel` (nothing more is
+  closed and the function returns false, so the new tab is not added). A veto in
+  `tabAboutToClose` also returns false, without pinning the tab.
+- A question shown from these signals runs a nested event loop. The limit check is not
+  re-entered meanwhile, and `tabAboutToClose` is not emitted twice for the same page.
 - Pinned tabs never count toward the limit and are never closed by it. A pinned tab
   shows a pin in place of its close button; clicking the pin unpins the tab. The pin
   icon is built in; `setPinIconUri()` replaces it.

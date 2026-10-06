@@ -200,9 +200,15 @@ bool MruTabWidget::requestCloseTab(QWidget *page, bool askPin)
         return false;
     }
 
+    // A question about this page is already open (in a nested event loop); don't ask twice
+    if (m_closeQuestions.contains(page))
+        return false;
+
     QPointer<QWidget> guard(page);
     bool allowClose = true;
+    m_closeQuestions.insert(page);
     emit tabAboutToClose(page, askPin, allowClose);
+    m_closeQuestions.remove(page);
     if (!allowClose || !guard) return false;
     emit tabClosing(page);
     if (!guard) return true;
@@ -1210,6 +1216,11 @@ void MruTabWidget::updateTabMarker(QWidget *page)
 int MruTabWidget::enforceTabLimit()
 {
     if (m_tabLimit <= 0) return 0;
+    if (m_limitBusy) {
+        // Called from a nested event loop while a limit question is open; check again later
+        m_limitCheckPending = true;
+        return 0;
+    }
 
     const int limitedCount = limitedTabCount();
     if (limitedCount <= m_tabLimit) return 0;
@@ -1217,6 +1228,7 @@ int MruTabWidget::enforceTabLimit()
     const QVector<QWidget*> found = findLeastRecentlyUsedUnpinnedTabs(limitedCount - m_tabLimit);
     const QList<QPointer<QWidget>> tabsToClose(found.begin(), found.end());
 
+    m_limitBusy = true;
     int removedCount = 0;
     for (const QPointer<QWidget> &w : tabsToClose) {
         if (!w || indexOf(w.data()) == -1) continue; // Widget not found, skip
@@ -1231,7 +1243,51 @@ int MruTabWidget::enforceTabLimit()
         }
     }
 
+    m_limitBusy = false;
+    finishLimitCheck();
     return removedCount;
+}
+
+bool MruTabWidget::makeRoomForNewTab()
+{
+    if (m_tabLimit <= 0) return true;
+    // Another limit question is open; adding a tab now would bypass it
+    if (m_limitBusy) return false;
+
+    m_limitBusy = true;
+    bool canAdd = true;
+    while (limitedTabCount() + 1 > m_tabLimit) {
+        const QVector<QWidget*> found = findLeastRecentlyUsedUnpinnedTabs(1);
+        if (found.isEmpty()) break;
+        const QPointer<QWidget> page(found.first());
+
+        LimitAction action = LimitAction::Close;
+        emit tabLimitReached(page.data(), action);
+        if (!page || indexOf(page.data()) < 0)
+            continue; // The receiver closed it itself
+        if (action == LimitAction::Cancel) {
+            canAdd = false;
+            break;
+        }
+        if (action == LimitAction::Keep) {
+            setTabPinned(page.data(), true);
+            continue;
+        }
+        if (!requestCloseTab(page.data(), true)) {
+            canAdd = false;
+            break;
+        }
+    }
+    m_limitBusy = false;
+    finishLimitCheck();
+    return canAdd;
+}
+
+void MruTabWidget::finishLimitCheck()
+{
+    if (!m_limitCheckPending) return;
+    m_limitCheckPending = false;
+    QTimer::singleShot(0, this, [this]() { enforceTabLimit(); });
 }
 
 

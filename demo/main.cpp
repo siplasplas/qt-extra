@@ -153,7 +153,7 @@ int main(int argc, char* argv[])
     limitSpin->setSpecialValueText("unlimited");
     limitSpin->setToolTip("Unpinned tabs per set; the least recently used ones are closed");
     limitRow->addWidget(limitSpin);
-    auto* askPinCheck = new QCheckBox("Ask before auto-close (No pins the tab)");
+    auto* askPinCheck = new QCheckBox("Ask which tab gives way");
     askPinCheck->setChecked(true);
     limitRow->addWidget(askPinCheck);
     auto* newTabAButton = new QPushButton("New tab in A");
@@ -165,6 +165,9 @@ int main(int argc, char* argv[])
 
     auto newTabCounter = std::make_shared<int>(0);
     auto addNewTab = [=](MruTabWidget* tabs) {
+        // Ask before adding, so that Cancel can still keep the new tab out
+        if (!tabs->makeRoomForNewTab())
+            return;
         const QString title = QString("new%1.txt").arg(++*newTabCounter);
         tabs->setCurrentWidget(addDemoTab(tabs, title, "new/" + title));
     };
@@ -228,14 +231,42 @@ int main(int argc, char* argv[])
         QObject::connect(tabs, &MruTabWidget::previewTabPromoted, [=](QWidget* page) {
             tabLog->appendPlainText("promoted " + tabs->tabText(tabs->indexOf(page)));
         });
-        // Direct connection: allow is read right after the signal returns
+        // The tab whose fate was already decided in tabLimitReached; its close is not asked again
+        auto decided = std::make_shared<QPointer<QWidget>>();
+        // Direct connection: action is read right after the signal returns
+        QObject::connect(tabs, &MruTabWidget::tabLimitReached,
+                         [=, &mainWindow](QWidget* page, MruTabWidget::LimitAction& action) {
+            *decided = page;
+            if (!askPinCheck->isChecked())
+                return;
+            const QString title = tabs->tabText(tabs->indexOf(page));
+            QMessageBox box(QMessageBox::Question, "Tab limit reached",
+                            QString("The new tab needs room. What should happen to \"%1\"?").arg(title),
+                            QMessageBox::NoButton, &mainWindow);
+            QAbstractButton* close = box.addButton("Close it", QMessageBox::AcceptRole);
+            QAbstractButton* keep = box.addButton("Keep it (pin)", QMessageBox::ActionRole);
+            box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(qobject_cast<QPushButton*>(close));
+            box.exec();
+            if (box.clickedButton() == close)
+                return;
+            action = box.clickedButton() == keep ? MruTabWidget::LimitAction::Keep
+                                                 : MruTabWidget::LimitAction::Cancel;
+            tabLog->appendPlainText((action == MruTabWidget::LimitAction::Keep
+                                         ? "kept and pinned " : "new tab cancelled for ") + title);
+        });
+        // Lowering the limit closes tabs without a new one; a veto pins the tab
         QObject::connect(tabs, &MruTabWidget::tabAboutToClose,
                          [=, &mainWindow](QWidget* page, bool askPin, bool& allow) {
+            if (page == *decided) {
+                *decided = nullptr;
+                return;
+            }
             if (!askPin || !askPinCheck->isChecked())
                 return;
             const QString title = tabs->tabText(tabs->indexOf(page));
             const auto answer = QMessageBox::question(
-                &mainWindow, "Tab limit reached",
+                &mainWindow, "Tab limit lowered",
                 QString("Close \"%1\"?\nNo keeps it open and pins it.").arg(title));
             if (answer != QMessageBox::Yes) {
                 allow = false;
