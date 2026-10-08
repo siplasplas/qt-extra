@@ -1,4 +1,5 @@
 .idea/
+HANDOFF*.md
 
 # C++ objects and libs
 *.slo
