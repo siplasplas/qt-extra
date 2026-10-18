@@ -269,6 +269,50 @@ segment is clicked or its menu needs actions.
 Filesystem breadcrumb built on `QxBreadcrumb`. Click a path segment to navigate
 to it, or click the arrow beside it to choose one of its subdirectories.
 
+### qxMigrateToSiplasplas (configuration and data places)
+siplasplas programs keep **configuration**, what the user chooses (settings,
+`QSettings`), in `~/.config/siplasplas/<app>/` (`QSettings`' file:
+`~/.config/siplasplas/<app>.conf`) and **data**, what the program downloads or
+produces (indexes, recent lists, logs), in `~/.local/share/siplasplas/<app>/`.
+A program sets the organization `siplasplas` and its lowercase name, then uses
+`AppConfigLocation`, `AppLocalDataLocation` and `QSettings()`.
+
+`qxMigrateToSiplasplas()` (`qxmigration.h`) moves a program's files from its
+old places once, at start-up before anything is read or created:
+
+```cpp
+QApplication app(argc, argv);
+app.setOrganizationName("siplasplas");
+app.setApplicationName("myeditor");
+app.setApplicationDisplayName("MyEditor");
+
+QxMigrationSpec spec;
+spec.configEntries = {"settings.json"};               // to ~/.config/siplasplas/myeditor/
+spec.dataEntries = {"config.json"};                   // to ~/.local/share/siplasplas/myeditor/
+spec.renames = {{"config.json", "recent-files.json"}};
+spec.oldSettingsFiles = {"~/.config/myeditor/MyEditor.conf"};  // to ~/.config/siplasplas/myeditor.conf
+const QxMigrationResult result = qxMigrateToSiplasplas(spec);
+for (const QString& line : result.log)
+    qInfo("%s", qPrintable(line));
+// Failed: nothing changed; the program may use its old places for this run.
+```
+
+- The old places are `~/.config/<app>`, `~/.local/share/<app>` and
+  `~/.config/<app>.conf` by default, plus `oldDirectories` and
+  `oldSettingsFiles`. Nothing happens when a new place exists already or no old
+  place exists.
+- Only the entries named in the spec (and passing the optional `recognize`
+  check) are moved; files are renamed, or copied and then removed across file
+  systems, and never overwrite anything.
+- Only when something in the old places is **not recognized** a question asks
+  whether to move it too (`askToMoveUnrecognized` replaces the question; without
+  a GUI the answer is No). It is not asked again, since the new places exist
+  afterwards.
+- Old directories are removed when empty. On a failure everything moved is
+  moved back and the result is `Failed`; the next start tries again.
+- `discardedEntries` are recognized but not moved (e.g. a virtual environment
+  the program recreates); `qxFinishMigration()` removes them afterwards.
+
 ### Ev (common utility)
 Qt5/Qt6 compatible helpers for extracting local and global positions from mouse,
 hover, and wheel events.
@@ -300,6 +344,7 @@ Headers are exposed automatically — no extra `include_directories()` needed:
 #include "qxrecentdialog.h"
 #include "qxbreadcrumb.h"
 #include "qxfilebreadcrumb.h"
+#include "qxmigration.h"
 ```
 
 The demo application is **not** built when qt-extra is included as a submodule.

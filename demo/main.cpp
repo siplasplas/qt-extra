@@ -32,7 +32,11 @@ static const char* fileFilter =
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
-    app.setApplicationName("qt-extra demo");
+    // siplasplas programs keep configuration in ~/.config/siplasplas/<app>/
+    // and data in ~/.local/share/siplasplas/<app>/ (see qxmigration.h).
+    app.setOrganizationName("siplasplas");
+    app.setApplicationName("qt-extra-demo");
+    app.setApplicationDisplayName("qt-extra demo");
 
     QMainWindow mainWindow;
     auto* central = new QWidget;
