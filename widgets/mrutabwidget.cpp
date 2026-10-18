@@ -28,47 +28,55 @@ constexpr int CTRL_TAB_TIMEOUT_MS = 200;
 
 namespace {
 
-// Draws the preview tab's label in italics. QTabBar has no per-tab font and the style
-// option does not carry the tab index, so the tab is recognized by its rectangle, or by
-// its text while it is being dragged. When neither matches, the label is drawn upright.
-class PreviewTabStyle : public QProxyStyle
+// Draws a tab's label: the preview tab in italics, and a tab with an extension with the
+// text that fits (MruTabWidget::tabDisplayText). QTabBar has no per-tab font and, in
+// Qt 5, no virtual initStyleOption(); the style option does not carry the tab index, so
+// the tab is recognized by its rectangle, or by its text and size while it is being
+// dragged. When neither matches, the label is drawn as QTabBar prepared it.
+class MruTabStyle : public QProxyStyle
 {
 public:
-    PreviewTabStyle(QStyle *base, MruTabWidget *owner) : QProxyStyle(base), m_owner(owner) {}
+    MruTabStyle(QStyle *base, MruTabWidget *owner) : QProxyStyle(base), m_owner(owner) {}
 
     void drawControl(ControlElement element, const QStyleOption *option, QPainter *painter,
                      const QWidget *widget) const override
     {
         const auto *tab = qstyleoption_cast<const QStyleOptionTab*>(option);
-        if (element == CE_TabBarTabLabel && tab && isPreviewTab(*tab, widget)) {
-            painter->save();
+        const int index = element == CE_TabBarTabLabel && tab ? tabIndex(*tab, widget) : -1;
+        if (index < 0) {
+            QProxyStyle::drawControl(element, option, painter, widget);
+            return;
+        }
+        QStyleOptionTab label(*tab);
+        // Without an extension the text stays as QTabBar prepared it (it may be elided).
+        if (!m_owner->tabExtension(m_owner->widget(index)).isEmpty())
+            label.text = m_owner->tabDisplayText(index);
+        const bool preview = m_owner->widget(index) == m_owner->previewTab();
+        painter->save();
+        if (preview) {
             QFont font = painter->font();
             font.setItalic(true);
             painter->setFont(font);
-            QProxyStyle::drawControl(element, option, painter, widget);
-            painter->restore();
-            return;
         }
-        QProxyStyle::drawControl(element, option, painter, widget);
+        QProxyStyle::drawControl(element, &label, painter, widget);
+        painter->restore();
     }
 
 private:
-    bool isPreviewTab(const QStyleOptionTab &tab, const QWidget *widget) const
+    int tabIndex(const QStyleOptionTab &tab, const QWidget *widget) const
     {
-        if (!m_owner || !m_owner->previewTab() || widget != m_owner->tabBar())
-            return false;
+        if (!m_owner || widget != m_owner->tabBar())
+            return -1;
         const QTabBar *bar = m_owner->tabBar();
-        const int previewIndex = m_owner->indexOf(m_owner->previewTab());
-        if (previewIndex < 0)
-            return false;
-        if (bar->tabRect(previewIndex) == tab.rect)
-            return true;
         for (int i = 0; i < bar->count(); ++i) {
             if (bar->tabRect(i) == tab.rect)
-                return false;
+                return i;
         }
-        return bar->tabText(previewIndex) == tab.text
-               && bar->tabRect(previewIndex).size() == tab.rect.size();
+        for (int i = 0; i < bar->count(); ++i) {
+            if (bar->tabText(i) == tab.text && bar->tabRect(i).size() == tab.rect.size())
+                return i;
+        }
+        return -1;
     }
 
     QPointer<MruTabWidget> m_owner;
@@ -152,6 +160,37 @@ QIcon paintedPinIcon(const QColor &color)
 
 } // namespace
 
+// Tab bar whose tab widths MruTabWidget decides when extensions or shared widths are in
+// use; otherwise QTabBar's own.
+class MruTabBar : public QTabBar
+{
+public:
+    explicit MruTabBar(MruTabWidget *owner) : QTabBar(owner), m_owner(owner) {}
+
+    int baseTabWidth(int index) const { return QTabBar::tabSizeHint(index).width(); }
+
+protected:
+    QSize tabSizeHint(int index) const override
+    {
+        QSize size = QTabBar::tabSizeHint(index);
+        if (m_owner->extensionLayoutActive())
+            size.setWidth(m_owner->tabWidthHint(index));
+        return size;
+    }
+
+    // QTabBar squeezes tabs down to this when they do not fit; the widths are decided
+    // already, and below them the scroll arrows appear.
+    QSize minimumTabSizeHint(int index) const override
+    {
+        if (m_owner->extensionLayoutActive())
+            return tabSizeHint(index);
+        return QTabBar::minimumTabSizeHint(index);
+    }
+
+private:
+    MruTabWidget *m_owner;
+};
+
 /**
  * @brief Constructs MruTabWidget with parent
  * @param parent Parent widget
@@ -164,6 +203,8 @@ MruTabWidget::MruTabWidget(QWidget *parent)
     m_ctrlTabTimer.setInterval(CTRL_TAB_TIMEOUT_MS);
     connect(&m_ctrlTabTimer, &QTimer::timeout, this, &MruTabWidget::handleCtrlTabTimeout);
 
+    // Before anything uses tabBar(), so that its connections and filters go to this bar
+    setTabBar(new MruTabBar(this));
     assert(tabBar());
     tabBar()->setMouseTracking(true);
     tabBar()->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -309,6 +350,9 @@ void MruTabWidget::hideEvent(QHideEvent *event) {
 
 // Override resizeEvent to update button mapping on resize
 void MruTabWidget::resizeEvent(QResizeEvent *event) {
+    // Shared widths depend on the room; lay the tabs out before the base class sizes the bar
+    if (m_sharedTabWidths && extensionLayoutActive())
+        relayoutTabs();
     QTabWidget::resizeEvent(event); // Call base implementation first
 
     // Remap buttons and update their visibility after the widget has been resized
@@ -442,6 +486,8 @@ void MruTabWidget::onCurrentChanged(int index)
     }
     // Update the visibility of close buttons when the selected tab changes
     updateCloseButtonVisibility();
+    if (m_sharedTabWidths && m_currentExtensionFirst && extensionLayoutActive())
+        relayoutTabs();
 }
 
 /**
@@ -1357,6 +1403,10 @@ void MruTabWidget::swapExternal(MruTabWidget* other, int thisIndex, int otherInd
             to->setTabPreview(page, true);
         if (pinned)
             to->setTabPinned(page, true);
+        if (!state.extension.isEmpty()) {
+            to->ensureTabStyle();
+            to->relayoutTabs();
+        }
     };
     carry(this, otherWidget, otherState, otherPreview);
     carry(other, thisWidget, thisState, thisPreview);
@@ -1389,7 +1439,7 @@ QString MruTabWidget::tabPopupText(int index) const
 {
     if (index < 0 || index >= count()) return {};
     const QString text = tabBar()->tabData(index).toString();
-    return text.isEmpty() ? tabText(index) : text;
+    return text.isEmpty() ? wholeTabName(index) : text;
 }
 
 void MruTabWidget::setTabPinned(int tabIndex, bool pinned)
@@ -1418,20 +1468,20 @@ void MruTabWidget::setTabPinned(QWidget *page, bool pinned)
     }
 }
 
-void MruTabWidget::ensurePreviewStyle()
+void MruTabWidget::ensureTabStyle()
 {
-    if (m_previewStyleInstalled)
+    if (m_tabStyleInstalled)
         return;
-    m_previewStyleInstalled = true;
+    m_tabStyleInstalled = true;
 #if QT_VERSION >= QT_VERSION_CHECK(6, 1, 0)
     const QString styleName = QApplication::style()->name();
 #else
     const QString styleName = QApplication::style()->objectName();
 #endif
     // The proxy owns its base style, so it gets its own instance of the application style
-    auto *previewStyle = new PreviewTabStyle(QStyleFactory::create(styleName), this);
-    previewStyle->setParent(this);
-    tabBar()->setStyle(previewStyle);
+    auto *tabStyle = new MruTabStyle(QStyleFactory::create(styleName), this);
+    tabStyle->setParent(this);
+    tabBar()->setStyle(tabStyle);
 }
 
 void MruTabWidget::setTabPreview(QWidget *page, bool preview)
@@ -1445,7 +1495,7 @@ void MruTabWidget::setTabPreview(QWidget *page, bool preview)
             m_tabStates[page].pinned = false;
             updateTabButton(page);
         }
-        ensurePreviewStyle();
+        ensureTabStyle();
         m_previewPage = page;
     } else {
         if (page != oldPreview) return;
@@ -1515,4 +1565,231 @@ void MruTabWidget::setTabAttention(QWidget *page, bool attention)
 bool MruTabWidget::tabAttention(QWidget *page) const
 {
     return m_tabStates.value(page).attention;
+}
+
+// --- Tab name extensions and shared widths ---
+
+void MruTabWidget::setTabExtension(QWidget *page, const QString &extension)
+{
+    if (!page || indexOf(page) < 0) return;
+    TabState &state = m_tabStates[page];
+    if (state.extension == extension) return;
+    state.extension = extension;
+    if (!extension.isEmpty())
+        ensureTabStyle();
+    relayoutTabs();
+}
+
+QString MruTabWidget::tabExtension(QWidget *page) const
+{
+    return m_tabStates.value(page).extension;
+}
+
+void MruTabWidget::setTabExtensionPosition(TabExtensionPosition position)
+{
+    if (m_extensionPosition == position) return;
+    m_extensionPosition = position;
+    relayoutTabs();
+}
+
+void MruTabWidget::setTabExtensionSeparator(const QString &separator)
+{
+    if (m_extensionSeparator == separator) return;
+    m_extensionSeparator = separator;
+    relayoutTabs();
+}
+
+void MruTabWidget::setSharedTabWidths(bool shared)
+{
+    if (m_sharedTabWidths == shared) return;
+    m_sharedTabWidths = shared;
+    relayoutTabs();
+}
+
+void MruTabWidget::setMinimumTabWidth(int pixels)
+{
+    pixels = qMax(-1, pixels);
+    if (m_minimumTabWidth == pixels) return;
+    m_minimumTabWidth = pixels;
+    relayoutTabs();
+}
+
+void MruTabWidget::setCurrentTabExtensionFirst(bool first)
+{
+    if (m_currentExtensionFirst == first) return;
+    m_currentExtensionFirst = first;
+    relayoutTabs();
+}
+
+bool MruTabWidget::extensionLayoutActive() const
+{
+    // Tabs at the sides keep QTabBar's own sizes.
+    if (tabPosition() == West || tabPosition() == East)
+        return false;
+    if (m_sharedTabWidths)
+        return true;
+    for (auto it = m_tabStates.cbegin(); it != m_tabStates.cend(); ++it) {
+        if (!it->extension.isEmpty())
+            return true;
+    }
+    return false;
+}
+
+MruTabWidget::TabWidths MruTabWidget::tabWidths(int index) const
+{
+    const QTabBar *bar = tabBar();
+    const QFontMetrics fm = bar->fontMetrics();
+    const auto *mruBar = dynamic_cast<const MruTabBar*>(bar);
+    TabWidths widths;
+    widths.title = mruBar ? mruBar->baseTabWidth(index) : bar->tabRect(index).width();
+    // What the tab needs besides its text: icon, buttons, markers, the style's margins
+    const int chrome = qMax(0, widths.title - fm.size(Qt::TextShowMnemonic, tabText(index)).width());
+    const int minimum = m_minimumTabWidth >= 0 ? m_minimumTabWidth : chrome + 8 * fm.averageCharWidth();
+    widths.minimum = qMax(minimum, widths.title);
+    const QString extension = tabExtension(widget(index));
+    widths.natural = extension.isEmpty()
+        ? widths.minimum
+        : qMax(widths.minimum, widths.title + fm.horizontalAdvance(m_extensionSeparator)
+                                   + fm.horizontalAdvance(extension));
+    return widths;
+}
+
+int MruTabWidget::tabBarRoom() const
+{
+    // The space the tab widget gives the bar, not the bar's own width, which follows its
+    // size hint.
+    int room = width();
+    const bool south = tabPosition() == South;
+    for (Qt::Corner corner : {south ? Qt::BottomLeftCorner : Qt::TopLeftCorner,
+                              south ? Qt::BottomRightCorner : Qt::TopRightCorner}) {
+        const QWidget *cornerWidget = this->cornerWidget(corner);
+        if (cornerWidget && !cornerWidget->isHidden())
+            room -= cornerWidget->sizeHint().width();
+    }
+    return qMax(0, room);
+}
+
+QVector<int> MruTabWidget::layoutTabWidths() const
+{
+    const int n = count();
+    QVector<TabWidths> tabs(n);
+    QVector<int> widths(n);
+    int naturalSum = 0;
+    int minimumSum = 0;
+    for (int i = 0; i < n; ++i) {
+        tabs[i] = tabWidths(i);
+        widths[i] = tabs[i].natural;
+        naturalSum += tabs[i].natural;
+        minimumSum += tabs[i].minimum;
+    }
+    const int room = tabBarRoom();
+    if (!m_sharedTabWidths || naturalSum <= room)
+        return widths;  // every name whole
+    if (minimumSum >= room) {
+        // Not even the titles fit: every tab at its minimum, and the scroll arrows
+        for (int i = 0; i < n; ++i)
+            widths[i] = tabs[i].minimum;
+        return widths;
+    }
+
+    QVector<int> rest;
+    for (int i = 0; i < n; ++i)
+        rest << i;
+    int restRoom = room;
+    const int current = currentIndex();
+    if (m_currentExtensionFirst && current >= 0 && current < n) {
+        // The current tab whole when the others' minimums still fit, else what is left
+        const TabWidths &tab = tabs[current];
+        widths[current] = qBound(tab.minimum, room - (minimumSum - tab.minimum), tab.natural);
+        rest.removeOne(current);
+        restRoom -= widths[current];
+    }
+
+    // The largest common width with which the tabs fit: each tab gets it, clamped to its
+    // minimum and natural widths, so tabs are equal unless their name is shorter or their
+    // title longer.
+    auto total = [&](int level) {
+        int sum = 0;
+        for (int i : rest)
+            sum += qBound(tabs[i].minimum, level, tabs[i].natural);
+        return sum;
+    };
+    int low = 0;
+    int high = 0;
+    for (int i : rest)
+        high = qMax(high, tabs[i].natural);
+    while (low < high) {
+        const int middle = (low + high + 1) / 2;
+        if (total(middle) <= restRoom)
+            low = middle;
+        else
+            high = middle - 1;
+    }
+    for (int i : rest)
+        widths[i] = qBound(tabs[i].minimum, low, tabs[i].natural);
+    return widths;
+}
+
+int MruTabWidget::tabWidthHint(int index) const
+{
+    const QVector<int> widths = layoutTabWidths();
+    return index >= 0 && index < widths.size() ? widths[index] : 0;
+}
+
+QString MruTabWidget::composeTabText(int index, int width) const
+{
+    const QString title = tabText(index);
+    const QString extension = tabExtension(widget(index));
+    if (extension.isEmpty())
+        return title;
+    const QFontMetrics fm = tabBar()->fontMetrics();
+    const int room = width - tabWidths(index).title - fm.horizontalAdvance(m_extensionSeparator);
+    QString shown;
+    if (room >= fm.horizontalAdvance(extension)) {
+        shown = extension;
+    } else if (room >= fm.horizontalAdvance(QChar(0x2026)) + fm.averageCharWidth()) {
+        const bool after = m_extensionPosition == TabExtensionPosition::AfterTitle;
+        shown = fm.elidedText(extension, after ? Qt::ElideRight : Qt::ElideLeft, room);
+    }
+    if (shown.isEmpty())
+        return title;  // an extension shortened to nothing goes with its separator
+    // The label is drawn with mnemonics; only the title's '&' keeps its meaning.
+    shown.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    QString separator = m_extensionSeparator;
+    separator.replace(QLatin1Char('&'), QStringLiteral("&&"));
+    return m_extensionPosition == TabExtensionPosition::AfterTitle ? title + separator + shown
+                                                                   : shown + separator + title;
+}
+
+QString MruTabWidget::tabDisplayText(int index) const
+{
+    if (index < 0 || index >= count())
+        return {};
+    if (!extensionLayoutActive())
+        return tabText(index);
+    return composeTabText(index, tabBar()->tabRect(index).width());
+}
+
+QString MruTabWidget::wholeTabName(int index) const
+{
+    const QString title = tabText(index);
+    const QString extension = tabExtension(widget(index));
+    if (extension.isEmpty())
+        return title;
+    return m_extensionPosition == TabExtensionPosition::AfterTitle
+        ? title + m_extensionSeparator + extension
+        : extension + m_extensionSeparator + title;
+}
+
+void MruTabWidget::relayoutTabs()
+{
+    // QTabBar caches its layout and the sizes of its texts. A FontChange event drops both
+    // and lays the tabs out again (QTabBar::changeEvent), without the side effect of the
+    // public setters that would also do it: setElideMode() and setIconSize() mark their
+    // values as chosen by the client, so a later style change no longer updates them.
+    QTabBar *bar = tabBar();
+    if (!bar) return;
+    QEvent event(QEvent::FontChange);
+    QCoreApplication::sendEvent(bar, &event);
+    bar->update();
 }

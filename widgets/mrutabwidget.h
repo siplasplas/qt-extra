@@ -45,6 +45,13 @@ public:
     };
     Q_ENUM(LimitAction)
 
+    /// @brief Where a tab's extension goes; see setTabExtension().
+    enum class TabExtensionPosition {
+        AfterTitle,  ///< title + separator + extension, the extension elided at its end
+        BeforeTitle  ///< extension + separator + title, the extension elided at its start
+    };
+    Q_ENUM(TabExtensionPosition)
+
 signals:
     /**
      * @brief Emitted by makeRoomForNewTab() for a tab that must give way to a new tab.
@@ -209,6 +216,45 @@ public:
     void setTabAttention(QWidget *page, bool attention);
     bool tabAttention(QWidget *page) const;
 
+    /**
+     * @brief Sets the extension of a tab's name: detail shown beside the title (tabText),
+     * shortened when room runs out while the title never is.
+     *
+     * E.g. a chat's title after a directory name ("agentin · Rename a conv…"), or the path
+     * before a directory name ("…/gitmy/agentin"). tabText() keeps returning the title; the
+     * Ctrl+Tab popup shows the whole name when no popup text is set. Extensions are shown
+     * on tabs at the top or bottom only. An empty extension removes it.
+     */
+    void setTabExtension(QWidget *page, const QString &extension);
+    QString tabExtension(QWidget *page) const;
+    /// @brief Extension after the title (default) or before it, for all tabs.
+    void setTabExtensionPosition(TabExtensionPosition position);
+    TabExtensionPosition tabExtensionPosition() const { return m_extensionPosition; }
+    /// @brief Drawn between title and extension while some of the extension is shown; default " ".
+    void setTabExtensionSeparator(const QString &separator);
+    QString tabExtensionSeparator() const { return m_extensionSeparator; }
+
+    /**
+     * @brief Shares the tab bar's width among the tabs (off by default).
+     *
+     * When all names fit they are shown whole. Otherwise the tabs get equal widths, each
+     * no wider than its whole name; narrower tabs shorten their extensions. A tab never
+     * gets narrower than its title or minimumTabWidth(); below that the scroll arrows
+     * appear. Tabs at the left or right side keep their own widths.
+     */
+    void setSharedTabWidths(bool shared);
+    bool sharedTabWidths() const { return m_sharedTabWidths; }
+    /// @brief The narrowest any tab gets, whatever its title; -1 (default): about
+    /// 8 average characters plus the tab's icon, buttons and margins.
+    void setMinimumTabWidth(int pixels);
+    int minimumTabWidth() const { return m_minimumTabWidth; }
+    /// @brief With shared widths, the current tab's extension is shortened last.
+    void setCurrentTabExtensionFirst(bool first);
+    bool currentTabExtensionFirst() const { return m_currentExtensionFirst; }
+
+    /// @brief The text drawn on a tab: its title with as much of its extension as fits.
+    QString tabDisplayText(int index) const;
+
     /// @brief Sets tab switching mode (false = MRU popup, true = sequential)
     void setSequentialTabSwitching(bool sequential) { m_sequentialTabSwitching = sequential; }
     bool sequentialTabSwitching() const { return m_sequentialTabSwitching; }
@@ -238,12 +284,30 @@ private slots:
     void onPopupListItemActivated(QListWidgetItem *item);
 
 private:
+    friend class MruTabBar;
+
     struct TabState {
         bool pinned = false;
         bool busy = false;
         bool attention = false;
         QString key;
+        QString extension;
     };
+
+    // Widths for one tab, in pixels of the tab bar
+    struct TabWidths {
+        int title = 0;    // icon, buttons, margins and the title: what the tab needs without extension
+        int minimum = 0;  // max(minimum tab width, title)
+        int natural = 0;  // the whole name, at least the minimum
+    };
+    bool extensionLayoutActive() const;
+    TabWidths tabWidths(int index) const;
+    int tabBarRoom() const;
+    QVector<int> layoutTabWidths() const;
+    int tabWidthHint(int index) const;
+    QString composeTabText(int index, int width) const;
+    QString wholeTabName(int index) const;
+    void relayoutTabs();
 
     void updateMruOrder(QWidget *page);
     void showMruPopup();
@@ -257,7 +321,7 @@ private:
     void updateTabMarker(QWidget *page);
     QTabBar::ButtonPosition closeButtonSide() const;
     QIcon pinIcon() const;
-    void ensurePreviewStyle();
+    void ensureTabStyle();
     bool handleCtrlTabEvent(QKeyEvent *keyEvent);
     void closePages(const QList<QWidget*> &pages);
     void forgetRemovedPages();
@@ -277,7 +341,12 @@ private:
     QList<QWidget*> m_mruOrder;
     QHash<QWidget*, TabState> m_tabStates;
     QWidget *m_previewPage = nullptr;
-    bool m_previewStyleInstalled = false;
+    bool m_tabStyleInstalled = false;
+    TabExtensionPosition m_extensionPosition = TabExtensionPosition::AfterTitle;
+    QString m_extensionSeparator = QStringLiteral(" ");
+    bool m_sharedTabWidths = false;
+    int m_minimumTabWidth = -1;
+    bool m_currentExtensionFirst = false;
     bool m_deletePagesOnClose = true;
     bool m_ctrlHeld = false;
     QTimer m_ctrlTabTimer;
