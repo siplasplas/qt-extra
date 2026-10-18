@@ -6,10 +6,10 @@ Extra Qt widgets and utilities designed to be included as a Git submodule.
 
 ### MruTabWidget
 `QTabWidget` extension for IDE-style tab sets: MRU (Most Recently Used) navigation
-with Ctrl+Tab, pinned tabs, a limit on open tabs, an optional preview tab, tab keys and
-busy/attention markers.
+with Ctrl+Tab, pinned tabs, a limit on open tabs, an optional preview tab, tab keys,
+busy/attention markers and tab names whose extensions shorten in a shared tab bar.
 
-All per-tab state (pinned, preview, busy, attention, key, MRU position) belongs to the
+All per-tab state (pinned, preview, busy, attention, key, extension, MRU position) belongs to the
 page widget, not to the tab index, so it follows a tab when the user drags it or when
 `swapTabs()`/`swapExternal()` move it. Signals identify tabs by page (`QWidget *`); an
 index is valid only at the moment it is read, so client code should keep pages instead.
@@ -78,7 +78,7 @@ A client that does not use them sees the plain behavior.
   starts editing the previewed item) or when it is pinned; `previewTabPromoted(page)` is
   then emitted. `previewTab()` returns the current preview page or nullptr. The italics
   come from a proxy of the application style that is set on the tab bar the first time
-  a preview tab is set.
+  a preview tab or a tab extension is set.
 - **Tab keys**. `setTabKey(page, key)` stores a client-defined key, e.g. a file path or a
   conversation id; `findTab(key)` returns the page showing it, so an already open item
   can be activated instead of opened twice.
@@ -88,6 +88,37 @@ A client that does not use them sees the plain behavior.
   the current tab does nothing. Markers use the tab button on the side opposite the close
   button, so they never replace the close or pin button; they are not shown when the
   client put its own button on that side.
+
+#### Tab names with shortenable extensions
+A tab's name can have two parts: the **title** (`tabText`), which identifies the tab and
+is never shortened, and the **extension**, detail that is shortened when room runs out.
+
+- `setTabExtension(page, text)` sets a tab's extension (empty removes it); `tabText()`
+  keeps returning the title.
+- `setTabExtensionPosition()`: **after the title** (default), elided at its end, e.g. a
+  chat's title: `agentin · Rename a conv…`; or **before the title**, elided at its start,
+  e.g. the path to a directory: `…/projects/agentin`.
+- `setTabExtensionSeparator()` is drawn between the parts only while some of the extension
+  is shown (default `" "`; e.g. `" · "` after a title, empty before it when the path
+  ends with its own `/`).
+- `setSharedTabWidths(true)` shares the tab bar's width (off by default). When all names
+  fit they are shown whole. Otherwise the tabs get equal widths, each no wider than its
+  whole name, and narrower tabs shorten their extensions. A tab never gets narrower than
+  its title or `setMinimumTabWidth()` (default about 8 average characters plus the tab's
+  icon and buttons), so a tab with a short title fills its minimum with some of its
+  extension; when even the titles do not fit, the scroll arrows appear.
+- `setCurrentTabExtensionFirst(true)`: the current tab gets its whole name first.
+- The Ctrl+Tab popup shows the whole name when no popup text is set; tooltips are the
+  client's. `tabDisplayText(index)` returns the text drawn on a tab.
+- Extensions and shared widths apply to tabs at the top or bottom; tabs at the left or
+  right side keep their own widths and show their titles.
+
+```cpp
+tabs->setSharedTabWidths(true);
+tabs->setTabExtensionSeparator(" · ");
+tabs->setTabText(tabs->indexOf(chat), "agentin");
+tabs->setTabExtension(chat, "Rename a conversation from the sidebar");
+```
 
 #### Example
 ```cpp
@@ -377,7 +408,9 @@ cmake --build build
 
 The demo's MruTabWidget page has two tab sets with a pinned, a busy, an attention and a
 preview tab, a tab limit spin box (with a prompt that pins a tab instead of closing it),
-buttons and a context menu entry for new tabs, and a log of the close signals.
+buttons and a context menu entry for new tabs, and a log of the close signals. Its Tab
+names page has tabs with extensions in either position, the separator, shared widths,
+the current tab first, the minimum tab width and a slider that narrows the tab bar.
 
 ## License
 
