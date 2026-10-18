@@ -16,6 +16,7 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QTimer>
+#include <QSlider>
 #include <QSpinBox>
 #include <QMessageBox>
 #include <memory>
@@ -58,6 +59,10 @@ int main(int argc, char* argv[])
     auto* breadcrumbPage = new QWidget;
     auto* breadcrumbPageLayout = new QVBoxLayout(breadcrumbPage);
     demoTabs->addTab(breadcrumbPage, "QxFileBreadcrumb");
+
+    auto* tabNamesPage = new QWidget;
+    auto* tabNamesPageLayout = new QVBoxLayout(tabNamesPage);
+    demoTabs->addTab(tabNamesPage, "Tab names");
 
     // --- MruTabWidget demo ---
     auto* tabGroup = new QGroupBox("Ctrl+Tab = MRU navigation");
@@ -286,6 +291,112 @@ int main(int argc, char* argv[])
         });
     }
     mruPageLayout->addWidget(tabGroup);
+
+    // --- Tab name extensions and shared widths demo ---
+    auto* namesGroup = new QGroupBox("Tab titles with shortenable extensions");
+    auto* namesGroupLayout = new QVBoxLayout(namesGroup);
+    namesGroupLayout->addWidget(new QLabel(
+        "The title is never shortened; the extension is, when the tabs share a narrow bar.\n"
+        "Narrow the bar with the slider (or the window); Ctrl+Tab shows the whole names."));
+
+    auto* namesTabs = new MruTabWidget;
+    namesTabs->setTabsClosable(true);
+    namesTabs->setMovable(true);
+    namesTabs->setUsesScrollButtons(true);
+    namesTabs->setSharedTabWidths(true);
+    namesTabs->setTabExtensionSeparator(" · ");
+
+    // Each tab has an extension for both positions: a chat title after the title (as in
+    // agentin) and the path leading to the directory before it (as in gemini-commander).
+    struct NamedTab { QString title, chat, path; };
+    auto namedTabs = std::make_shared<QHash<QWidget*, NamedTab>>();
+    auto applyExtension = [=](QWidget* page) {
+        const NamedTab& tab = namedTabs->value(page);
+        const bool before = namesTabs->tabExtensionPosition()
+                            == MruTabWidget::TabExtensionPosition::BeforeTitle;
+        namesTabs->setTabExtension(page, before ? tab.path : tab.chat);
+    };
+    auto addNamedTab = [=](const QString& title, const QString& chat, const QString& path) {
+        auto* page = new QTextEdit;
+        page->setPlainText(QString("Title: %1\nChat (after the title): %2\nPath (before the title): %3")
+                               .arg(title, chat.isEmpty() ? "(none)" : chat, path));
+        namedTabs->insert(page, {title, chat, path});
+        namesTabs->addTab(page, title);
+        applyExtension(page);
+        return page;
+    };
+    addNamedTab("agentin", "Rename a conversation from the sidebar", "/home/user/projects/");
+    addNamedTab("gicior", "Fix the commit graph colours", "/home/user/projects/");
+    addNamedTab("total-commander", "Compare two directories", "/mnt/backup/old/");
+    addNamedTab("a", "Short title, long extension that fills its minimum width", "/tmp/");
+    addNamedTab("notes", "", "/home/user/");
+
+    auto* namesOptions = new QHBoxLayout;
+    namesOptions->addWidget(new QLabel("Extension:"));
+    auto* extensionPositionCombo = new QComboBox;
+    extensionPositionCombo->addItems({"After the title", "Before the title"});
+    namesOptions->addWidget(extensionPositionCombo);
+    namesOptions->addWidget(new QLabel("Separator:"));
+    auto* separatorEdit = new QLineEdit(" · ");
+    separatorEdit->setMaximumWidth(60);
+    namesOptions->addWidget(separatorEdit);
+    auto* sharedCheck = new QCheckBox("Shared widths");
+    sharedCheck->setChecked(true);
+    namesOptions->addWidget(sharedCheck);
+    auto* currentFirstCheck = new QCheckBox("Current tab's extension first");
+    namesOptions->addWidget(currentFirstCheck);
+    namesOptions->addStretch();
+    namesGroupLayout->addLayout(namesOptions);
+
+    auto* namesOptions2 = new QHBoxLayout;
+    namesOptions2->addWidget(new QLabel("Minimum tab width:"));
+    auto* minimumWidthSpin = new QSpinBox;
+    minimumWidthSpin->setRange(-1, 400);
+    minimumWidthSpin->setValue(-1);
+    minimumWidthSpin->setSpecialValueText("default");
+    minimumWidthSpin->setSuffix(" px");
+    namesOptions2->addWidget(minimumWidthSpin);
+    auto* addNamedButton = new QPushButton("Add tab with a long name");
+    namesOptions2->addWidget(addNamedButton);
+    namesOptions2->addWidget(new QLabel("Bar width:"));
+    auto* barWidthSlider = new QSlider(Qt::Horizontal);
+    barWidthSlider->setRange(150, 1600);
+    barWidthSlider->setValue(1600);
+    namesOptions2->addWidget(barWidthSlider, 1);
+    namesGroupLayout->addLayout(namesOptions2);
+    namesGroupLayout->addWidget(namesTabs, 1);
+
+    QObject::connect(extensionPositionCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+                     [=](int index) {
+        const bool before = index == 1;
+        namesTabs->setTabExtensionPosition(before ? MruTabWidget::TabExtensionPosition::BeforeTitle
+                                                  : MruTabWidget::TabExtensionPosition::AfterTitle);
+        // A path ends with its own separator and touches the title
+        separatorEdit->setText(before ? QString() : QString(" · "));
+        for (int i = 0; i < namesTabs->count(); ++i)
+            applyExtension(namesTabs->widget(i));
+    });
+    QObject::connect(separatorEdit, &QLineEdit::textChanged,
+                     [=](const QString& text) { namesTabs->setTabExtensionSeparator(text); });
+    QObject::connect(sharedCheck, &QCheckBox::toggled,
+                     [=](bool shared) { namesTabs->setSharedTabWidths(shared); });
+    QObject::connect(currentFirstCheck, &QCheckBox::toggled,
+                     [=](bool first) { namesTabs->setCurrentTabExtensionFirst(first); });
+    QObject::connect(minimumWidthSpin, QOverload<int>::of(&QSpinBox::valueChanged),
+                     [=](int pixels) { namesTabs->setMinimumTabWidth(pixels); });
+    auto namedCounter = std::make_shared<int>(0);
+    QObject::connect(addNamedButton, &QPushButton::clicked, [=]() {
+        const int n = ++*namedCounter;
+        namesTabs->setCurrentWidget(addNamedTab(
+            QString("project-%1").arg(n),
+            QString("A long chat title number %1 that needs shortening").arg(n),
+            QString("/home/user/a/rather/deep/directory/tree/number/%1/").arg(n)));
+    });
+    QObject::connect(barWidthSlider, &QSlider::valueChanged,
+                     [=](int width) { namesTabs->setMaximumWidth(width); });
+    QObject::connect(namesTabs, &MruTabWidget::tabClosed,
+                     [=](QWidget* page) { namedTabs->remove(page); });
+    tabNamesPageLayout->addWidget(namesGroup);
 
     // --- Filesystem breadcrumb demo ---
     auto* breadcrumbGroup = new QGroupBox("Filesystem breadcrumb");
